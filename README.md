@@ -202,15 +202,10 @@ to point to the directory containing the pipeline output.
 
 ## Cyclone tracking
 
-Cyclone and anticyclone tracks are generated with the **TRACK** algorithm:
-
-* Hodges, K. I. (1994). A general method for tracking analysis and its
-  application to meteorological data. *Mon. Wea. Rev.*, **122**, 2573–2586.
-* Hodges, K. I. (1995). Feature tracking on the unit sphere. *Mon. Wea. Rev.*,
-  **123**, 3458–3465.
-* Hoskins, B., & Hodges, K. I. (2019). The annual cycle of Northern Hemisphere
-  storm tracks. Part I: Seasons. *J. Climate*, **32**, 1743–1760.
-  [doi:10.1175/JCLI-D-17-0870](https://doi.org/10.1175/JCLI-D-17-0870)
+Cyclone and anticyclone tracks are generated with the **TRACK** algorithm
+(Hoskins, B., & Hodges, K. I. (2019). The annual cycle of Northern Hemisphere
+storm tracks. Part I: Seasons. *J. Climate*, **32**, 1743–1760.
+[doi:10.1175/JCLI-D-17-0870](https://doi.org/10.1175/JCLI-D-17-0870)).
 
 TRACK also produces the filtered T42 vorticity fields used in the masking step.
 

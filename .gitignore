@@ -44,3 +44,9 @@ Thumbs.db
 
 # ruff cache
 .ruff_cache/
+
+# Generated plot outputs
+notebooks/*.png
+notebooks/*.pdf
+*.sbatch
+nb_fig_fix_*.out
