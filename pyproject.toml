@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cyclone-energetics"
+version = "1.0.0"
+description = "Cyclone energetics analysis pipeline: flux computation, cyclone tracking, masking, integration, composites, and figure generation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Giorgio M. Sarro"},
+]
+
+dependencies = [
+    "matplotlib>=3.7",
+    "netCDF4>=1.6",
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+    "typer>=0.9",
+    "typing_extensions>=4.0",
+    "xarray>=2023.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=1.5",
+    "pytest>=7.0",
+    "ruff>=0.1",
+]
+
+[project.scripts]
+cyclone-energetics = "cyclone_energetics.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
