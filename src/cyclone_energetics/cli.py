@@ -12,7 +12,9 @@ import cyclone_energetics.flux_computation as flux_computation
 import cyclone_energetics.integration as integration
 import cyclone_energetics.masking as masking
 import cyclone_energetics.smoothing as smoothing
+import cyclone_energetics.storage_computation as storage_computation
 import cyclone_energetics.track_processing as track_processing
+import cyclone_energetics.zonal_advection as zonal_advection
 
 app = typer.Typer(help="Cyclone energetics processing pipeline.")
 
@@ -39,6 +41,7 @@ def compute_te(
         int, typer.Option(help="End year (exclusive)")
     ] = 2023,
 ) -> None:
+    """Step 1a: Compute transient-eddy (meridional) MSE flux divergence."""
     _setup_logging()
     print("Computing transient eddy fluxes from ERA5")
     flux_computation.compute_transient_eddy_flux(
@@ -51,9 +54,63 @@ def compute_te(
 
 
 @app.command()
+def compute_dhdt(
+    era5_base_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Base ERA5 data directory")
+    ],
+    output_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Output directory for dh/dt files")
+    ],
+    year_start: typing_extensions.Annotated[
+        int, typer.Option(help="Start year (inclusive)")
+    ] = 2000,
+    year_end: typing_extensions.Annotated[
+        int, typer.Option(help="End year (exclusive)")
+    ] = 2023,
+) -> None:
+    """Step 1b: Compute the MSE storage term dh/dt."""
+    _setup_logging()
+    print("Computing MSE storage term (dh/dt)")
+    storage_computation.compute_storage_term(
+        year_start=year_start,
+        year_end=year_end,
+        era5_base_directory=era5_base_directory,
+        output_directory=output_directory,
+    )
+    print("Done.")
+
+
+@app.command()
+def compute_zonal_mse(
+    era5_base_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Base ERA5 data directory")
+    ],
+    output_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Output directory for zonal advection files")
+    ],
+    year_start: typing_extensions.Annotated[
+        int, typer.Option(help="Start year (inclusive)")
+    ] = 2000,
+    year_end: typing_extensions.Annotated[
+        int, typer.Option(help="End year (exclusive)")
+    ] = 2023,
+) -> None:
+    """Step 1c: Compute the zonal MSE advection divergence."""
+    _setup_logging()
+    print("Computing zonal MSE advection divergence")
+    zonal_advection.compute_zonal_advection(
+        year_start=year_start,
+        year_end=year_end,
+        era5_base_directory=era5_base_directory,
+        output_directory=output_directory,
+    )
+    print("Done.")
+
+
+@app.command()
 def smooth(
     input_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="ERA5 input directory")
+        pathlib.Path, typer.Option(help="Input directory with ERA5 fields")
     ],
     output_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for smoothed files")
@@ -66,11 +123,12 @@ def smooth(
     ] = 2000,
     year_end: typing_extensions.Annotated[
         int, typer.Option(help="End year (exclusive)")
-    ] = 2015,
+    ] = 2023,
     target_grid: typing_extensions.Annotated[
         str, typer.Option(help="CDO target grid specification")
     ] = "r360x180",
 ) -> None:
+    """Step 2: Smooth / regrid ERA5 fields using CDO."""
     _setup_logging()
     var_list = [v.strip() for v in (variables or "TE").split(",")]
     print("Smoothing ERA5 fields: %s" % var_list)
@@ -94,6 +152,7 @@ def process_tracks(
         pathlib.Path, typer.Option(help="Output directory for processed .npz files")
     ],
 ) -> None:
+    """Step 3: Process raw TRACK algorithm output into .npz arrays."""
     _setup_logging()
     print("Processing cyclone track data")
     track_processing.process_track_data(
@@ -109,7 +168,7 @@ def create_masks(
         str, typer.Option(help="Hemisphere: NH or SH")
     ],
     vorticity_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with vorticity data")
+        pathlib.Path, typer.Option(help="Directory with filtered vorticity data")
     ],
     track_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Directory with processed track .npz files")
@@ -122,11 +181,12 @@ def create_masks(
     ] = 2000,
     year_end: typing_extensions.Annotated[
         int, typer.Option(help="End year (exclusive)")
-    ] = 2015,
+    ] = 2023,
     vorticity_threshold: typing_extensions.Annotated[
         float, typer.Option(help="Vorticity threshold in CVU")
     ] = 0.225,
 ) -> None:
+    """Step 4: Build cyclone/anticyclone masks from vorticity contours."""
     _setup_logging()
     print("Creating cyclone masks for hemisphere=%s" % hemisphere)
     masking.create_cyclone_masks(
@@ -147,10 +207,10 @@ def integrate_fluxes(
         pathlib.Path, typer.Option(help="Directory with TE flux files")
     ],
     dhdt_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with dh/dt files")
+        pathlib.Path, typer.Option(help="Directory with smoothed dh/dt files")
     ],
     vint_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with vertically integrated fields")
+        pathlib.Path, typer.Option(help="Directory with smoothed vertically integrated fields")
     ],
     radiation_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Directory with radiation data")
@@ -160,11 +220,12 @@ def integrate_fluxes(
     ],
     year_start: typing_extensions.Annotated[
         int, typer.Option(help="Start year (inclusive)")
-    ] = 2016,
+    ] = 2000,
     year_end: typing_extensions.Annotated[
         int, typer.Option(help="End year (exclusive)")
     ] = 2023,
 ) -> None:
+    """Step 5: Poleward-integrate energy flux fields."""
     _setup_logging()
     print("Integrating fluxes poleward")
     integration.integrate_fluxes_poleward(
@@ -203,6 +264,7 @@ def assign_fluxes(
         str, typer.Option(help="Area cut threshold")
     ] = "0.225",
 ) -> None:
+    """Step 6: Assign integrated fluxes to cyclone/anticyclone categories."""
     _setup_logging()
     print("Assigning fluxes to cyclones and anticyclones")
     flux_assignment.assign_fluxes_with_intensity(
@@ -239,11 +301,12 @@ def build_composites(
     ] = 2000,
     year_end: typing_extensions.Annotated[
         int, typer.Option(help="End year (exclusive)")
-    ] = 2015,
+    ] = 2023,
     intensity_threshold: typing_extensions.Annotated[
         int, typer.Option(help="Minimum intensity for composites")
     ] = 6,
 ) -> None:
+    """Step 7: Build cyclone-centred composites per hemisphere."""
     _setup_logging()
     print("Building cyclone-centered composites")
     composites.build_cyclone_composites(
@@ -282,6 +345,7 @@ def condense_composites(
         pathlib.Path, typer.Option(help="Output directory")
     ],
 ) -> None:
+    """Step 8: Create a single condensed monthly composite file."""
     _setup_logging()
     print("Creating condensed monthly composites")
     output_path = output_directory / "Composites_monthly_condensed.nc"
