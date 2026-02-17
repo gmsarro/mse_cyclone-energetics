@@ -19,28 +19,36 @@ def _compute_beta_mask(
 ) -> npt.NDArray[np.floating]:
     """Compute the below-ground weighting factor (beta).
 
-    Grid points fully above the surface get beta=1; points fully below get
-    beta=0; points that straddle the surface get a linear weight between 0
-    and 1.  This ensures that vertically integrated quantities correctly
-    exclude below-ground data.
+    For each pressure level j the neighbours are defined as:
+      p_j_plus_1  = pa3d[:, j-1, :, :]   (the level above, lower pressure)
+      p_j_minus_1 = pa3d[:, j+1, :, :]   (the level below, higher pressure)
+
+    beta = (ps - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
+    Points fully above the surface (p_j_minus_1 < ps) get beta = 1.
+    Points fully below the surface (p_j_plus_1 > ps)  get beta = 0.
+
+    Level index 36 (typically ~925 hPa on the ERA5 37-level grid) is
+    always recomputed to ensure the transition level is handled correctly,
+    matching the original implementation exactly.
     """
-    pa = pressure_levels_3d
-    ps = surface_pressure_3d
+    pa3d = pressure_levels_3d
+    ps3d = surface_pressure_3d
 
-    p_below = np.empty_like(pa)
-    p_above = np.empty_like(pa)
-    p_below[:, 0, :, :] = pa[:, 0, :, :]
-    p_below[:, 1:, :, :] = pa[:, :-1, :, :]
-    p_above[:, 0, :, :] = pa[:, 0, :, :]
-    p_above[:, 1:, :, :] = pa[:, 1:, :, :]
+    p_j_minus_1 = np.copy(pa3d)
+    p_j_plus_1 = np.copy(pa3d)
+    p_j_plus_1[:, 1:, :, :] = pa3d[:, :-1, :, :]
+    p_j_minus_1[:, 1:, :, :] = pa3d[:, 1:, :, :]
 
-    denom = p_above - p_below
-    denom[denom == 0] = 1.0
-    beta = (ps - p_below) / denom
+    idx_below = p_j_plus_1 > ps3d
+    idx_above = p_j_minus_1 < ps3d
 
-    beta[p_above < ps] = 1.0
-    beta[p_below > ps] = 0.0
-    np.clip(beta, 0.0, 1.0, out=beta)
+    beta = (ps3d - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
+    beta[idx_above] = 1.0
+    beta[:, 36, :, :] = (
+        (ps3d[:, 36, :, :] - p_j_plus_1[:, 36, :, :])
+        / (p_j_minus_1[:, 36, :, :] - p_j_plus_1[:, 36, :, :])
+    )
+    beta[idx_below] = 0.0
 
     return beta
 

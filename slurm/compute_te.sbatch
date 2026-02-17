@@ -15,7 +15,7 @@ module load python
 YEAR=${SLURM_ARRAY_TASK_ID}
 
 cyclone-energetics compute-te \
-    --era5-base-directory /project2/tas1/gmsarro/ERA5 \
+    --era5-base-directory /project2/tas1/abacus/data1/tas/archive/Reanalysis/ERA5 \
     --output-directory /project2/tas1/gmsarro/cyclone_energetics/output/TE \
     --year-start "${YEAR}" \
     --year-end "$((YEAR + 1))"

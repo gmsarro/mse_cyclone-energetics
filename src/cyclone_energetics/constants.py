@@ -31,3 +31,7 @@ VORTICITY_THRESHOLD: float = 0.225
 DISTANCE_THRESHOLD: float = 1.5e6
 
 PW_TO_WM2_FACTOR: float = 1e-15
+
+ERA5_BASE_DIRECTORY: str = (
+    "/project2/tas1/abacus/data1/tas/archive/Reanalysis/ERA5"
+)

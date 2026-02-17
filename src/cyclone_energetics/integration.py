@@ -172,10 +172,13 @@ def integrate_fluxes_poleward(
                     / ("era5_vint_%d_%s_filtered.nc" % (year, month))
                 )
             ) as ds_vint:
-                latitude = ds_vint["latitude"][::-1]
                 vigd = np.array(ds_vint["vigd_filtered"][:max_day, ::-1, :])
                 vimdf = np.array(ds_vint["vimdf_filtered"][:max_day, ::-1, :])
                 vithed = np.array(ds_vint["vithed_filtered"][:max_day, ::-1, :])
+
+            # Use latitude from the TE file for all integrations, matching
+            # the original code (make_TE_int_2025.py line: latitude = np.copy(lat))
+            latitude = np.copy(np.asarray(lat))
 
             tot_energy = (
                 vigd + vimdf * constants.LATENT_HEAT_VAPORIZATION + vithed
