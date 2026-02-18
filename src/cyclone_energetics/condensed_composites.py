@@ -56,9 +56,9 @@ def _compute_stormtrack_position(
 
     y_d = np.linspace(0, 12, 12)
     y3_d = np.linspace(0, 12, 12)
-    f_te_zon_int = scipy.interpolate.interp2d(
-        x_d, y_d, f_te_zon, kind="cubic"
-    )(x3_d, y3_d)
+    f_te_zon_int = scipy.interpolate.RectBivariateSpline(
+        y_d, x_d, f_te_zon
+    )(y3_d, x3_d)
 
     stormtrack_sh = np.argmin(f_te_zon_int, axis=1)
     return lat_hi[stormtrack_sh]

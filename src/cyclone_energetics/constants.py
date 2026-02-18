@@ -1,3 +1,5 @@
+import typing
+
 import numpy as np
 
 EARTH_RADIUS: float = 6.371e6
@@ -17,8 +19,6 @@ MONTH_BOUNDARIES: np.ndarray = np.array(
     [0, 124, 236, 360, 480, 604, 724, 848, 972, 1092, 1216, 1336, 1460]
 )
 TIMESTEPS_PER_YEAR: int = 1460
-
-import typing
 
 MONTH_STRINGS: typing.List[str] = [
     "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"

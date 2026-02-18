@@ -6,6 +6,7 @@ import typer
 import typing_extensions
 
 import cyclone_energetics.composites as composites
+import cyclone_energetics.composites_wm as composites_wm
 import cyclone_energetics.condensed_composites as condensed_composites
 import cyclone_energetics.flux_assignment as flux_assignment
 import cyclone_energetics.flux_computation as flux_computation
@@ -316,6 +317,71 @@ def build_composites(
         track_types=["TRACK", "ANTIC"],
         track_directory=track_directory,
         integrated_flux_directory=integrated_flux_directory,
+        mask_directory_sh=mask_directory_sh,
+        mask_directory_nh=mask_directory_nh,
+        output_directory=output_directory,
+        intensity_threshold=intensity_threshold,
+    )
+    print("Done.")
+
+
+@app.command()
+def build_wm_composites(
+    track_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with track .nc files")
+    ],
+    integrated_flux_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with integrated flux files")
+    ],
+    vint_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with smoothed vint files")
+    ],
+    dhdt_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with smoothed dh/dt files")
+    ],
+    radiation_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with radiation data")
+    ],
+    z_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with geopotential height data")
+    ],
+    vorticity_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with filtered T42 vorticity files")
+    ],
+    mask_directory_nh: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="NH mask directory")
+    ],
+    mask_directory_sh: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="SH mask directory")
+    ],
+    output_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Output directory for W/m² composites")
+    ],
+    year_start: typing_extensions.Annotated[
+        int, typer.Option(help="Start year (inclusive)")
+    ] = 2000,
+    year_end: typing_extensions.Annotated[
+        int, typer.Option(help="End year (exclusive)")
+    ] = 2015,
+    intensity_threshold: typing_extensions.Annotated[
+        int, typer.Option(help="Minimum track intensity (0=all, 6=intense only)")
+    ] = 0,
+) -> None:
+    """Step 7b: Build cyclone-centred composites of local (W/m²) budget terms."""
+    _setup_logging()
+    print("Building W/m² cyclone-centred composites")
+    composites_wm.build_wm_composites(
+        year_start=year_start,
+        year_end=year_end,
+        hemispheres=["SH", "NH"],
+        track_types=["TRACK", "ANTIC"],
+        track_directory=track_directory,
+        integrated_flux_directory=integrated_flux_directory,
+        vint_directory=vint_directory,
+        dhdt_directory=dhdt_directory,
+        radiation_directory=radiation_directory,
+        z_directory=z_directory,
+        vorticity_directory=vorticity_directory,
         mask_directory_sh=mask_directory_sh,
         mask_directory_nh=mask_directory_nh,
         output_directory=output_directory,

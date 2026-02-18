@@ -38,7 +38,8 @@ cyclone_energetics/
     ├── masking.py              # Step 4   — cyclone/anticyclone masks
     ├── integration.py          # Step 5   — poleward flux integration
     ├── flux_assignment.py      # Step 6   — assign fluxes by intensity bin
-    ├── composites.py           # Step 7   — cyclone-centred composites
+    ├── composites.py           # Step 7a  — cyclone-centred composites (integrated fluxes)
+    ├── composites_wm.py        # Step 7b  — cyclone-centred composites (W/m² budget terms)
     └── condensed_composites.py # Step 8   — condensed monthly composites
 ```
 
@@ -112,8 +113,12 @@ documented via `--help`.
         │
         ▼
  ┌─────────────────────────────────┐
- │  Step 7: build-composites       │──► Cyclone-centred composites
+ │  Step 7a: build-composites      │──► Composites from integrated fluxes
  └──────┬──────────────────────────┘
+        │
+ ┌─────────────────────────────────┐
+ │  Step 7b: build-wm-composites   │──► Composites of local (W/m²) budget terms
+ └──────┬──────────────────────────┘    (SHF residual, Z, VO, etc.)
         │
         ▼
  ┌─────────────────────────────────┐
@@ -199,6 +204,11 @@ to point to the directory containing the pipeline output.
   cyclone-centred MSE energy budget: transient eddy (TE), surface heat
   flux (SHF), radiation (Swabs, OLR), MSE storage (dh/dt), and zonal
   MSE advection.
+* **SHF as a residual** — The surface heat flux (SHF) in W m⁻² is
+  calculated as a residual of the MSE budget:
+  `SHF = (vigd + vimdf·Lv + vithed) − (TSR − SSR) − TTR + dh/dt`.
+  This is computed in the W/m² composites (Step 7b) and does not require
+  separate ERA5 surface flux downloads.
 
 ---
 

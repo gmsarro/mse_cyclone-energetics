@@ -40,8 +40,10 @@ def _interpolate_masks_to_era5(
 
     mask_interp = np.zeros((n_time, _N_LAT_ERA5 + 2, _N_LAT_ERA5 + 2), float)
     for t in range(n_time):
-        f = scipy.interpolate.interp2d(x, y, mask_data[t, :, :], kind="linear")
-        mask_interp[t, :, :] = f(xi, yi)
+        spline = scipy.interpolate.RectBivariateSpline(
+            y, x, mask_data[t, :, :], kx=1, ky=1,
+        )
+        mask_interp[t, :, :] = spline(yi, xi)
     return mask_interp
 
 
@@ -243,14 +245,14 @@ def _combine_hemisphere_masks(
     cyc_interp = np.zeros((n_time, _N_LAT_ERA5 + 2, _N_LON_ERA5), float)
 
     for t in range(n_time):
-        f_ant = scipy.interpolate.interp2d(
-            x, y, ant_combined[t, :, :], kind="linear"
+        spline_ant = scipy.interpolate.RectBivariateSpline(
+            y, x, ant_combined[t, :, :], kx=1, ky=1,
         )
-        ant_interp[t, :, :] = f_ant(xi, yi)
-        f_cyc = scipy.interpolate.interp2d(
-            x, y, cyc_combined[t, :, :], kind="linear"
+        ant_interp[t, :, :] = spline_ant(yi, xi)
+        spline_cyc = scipy.interpolate.RectBivariateSpline(
+            y, x, cyc_combined[t, :, :], kx=1, ky=1,
         )
-        cyc_interp[t, :, :] = f_cyc(xi, yi)
+        cyc_interp[t, :, :] = spline_cyc(yi, xi)
 
     return cyc_interp, ant_interp
 
