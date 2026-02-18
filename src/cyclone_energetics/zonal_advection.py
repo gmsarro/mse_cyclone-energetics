@@ -194,4 +194,10 @@ def _compute_zonal_divergence(
 
     grad_lon = np.gradient(field_padded, lon_rad, axis=2)
     cos_3d = cos_lat[np.newaxis, :, np.newaxis]
-    return (grad_lon / (constants.EARTH_RADIUS * cos_3d))[:, :, 1:-1]
+    # Avoid division by zero at poles (cos(90°) ≈ 0); set divergence to 0 there
+    with np.errstate(divide="ignore", invalid="ignore"):
+        result = (grad_lon / (constants.EARTH_RADIUS * cos_3d))[:, :, 1:-1]
+    # At the poles the zonal divergence is identically zero by symmetry
+    pole_mask = np.abs(cos_lat) < 1e-10
+    result[:, pole_mask, :] = 0.0
+    return result
