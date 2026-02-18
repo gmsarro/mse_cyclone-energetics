@@ -28,6 +28,9 @@ import cyclone_energetics.constants as constants
 
 _LOG = logging.getLogger(__name__)
 
+# np.trapz was removed in NumPy 2.0; np.trapezoid is the replacement.
+_trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]
+
 _LATITUDE_CHUNK_SIZE: int = 72
 _DT_CENTERED: float = 43200.0  # 12 h in seconds (centred difference)
 _DT_FORWARD: float = 21600.0   # 6 h in seconds (forward / backward diff)
@@ -176,7 +179,7 @@ def _process_single_month_dhdt(
 
         sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
         dvmsedt[:, lat_start:lat_end, :] = (
-            sign / constants.GRAVITY * np.trapz(dmsedt, pa3d, axis=1)
+            sign / constants.GRAVITY * _trapz(dmsedt, pa3d, axis=1)
         )
         del dmsedt
         _LOG.info("  Block %s complete", lat_block)

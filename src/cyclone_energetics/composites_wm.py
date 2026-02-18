@@ -8,8 +8,9 @@ composites *meridionally integrated* fluxes, this module reads the raw
     composite_energy = vigd + vimdf × L_v + vithed          (column MSE)
     composite_Shf    = energy - (TSR - SSR) - TTR + Dhdt    (residual SHF, W m⁻²)
 
-The geopotential height (Z) and filtered vorticity (VO) are also composited
-to provide the spatial structure around each cyclone centre.
+The geopotential height (Z), 2-m temperature (T), 850-hPa specific humidity
+(Q), and filtered vorticity (VO) are also composited to provide the spatial
+structure around each cyclone centre.
 """
 
 import logging
@@ -28,6 +29,7 @@ _COMPOSITE_BOX_DEGREES: float = 15.0
 _COMPOSITE_GRID_SIZE: int = 120
 _VO_GRID_SIZE: int = 20
 _GEOPOTENTIAL_LEVEL_INDEX: int = 30
+_Q_LEVEL_INDEX: int = 35  # 850 hPa
 
 
 def build_wm_composites(
@@ -42,6 +44,8 @@ def build_wm_composites(
     dhdt_directory: pathlib.Path,
     radiation_directory: pathlib.Path,
     z_directory: pathlib.Path,
+    t2m_directory: pathlib.Path,
+    q_directory: pathlib.Path,
     vorticity_directory: pathlib.Path,
     mask_directory_sh: pathlib.Path,
     mask_directory_nh: pathlib.Path,
@@ -114,6 +118,8 @@ def build_wm_composites(
                 dhdt_directory=dhdt_directory,
                 radiation_directory=radiation_directory,
                 z_directory=z_directory,
+                t2m_directory=t2m_directory,
+                q_directory=q_directory,
                 vorticity_directory=vorticity_directory,
                 output_directory=output_directory,
                 flux_lat=flux_lat,
@@ -139,6 +145,8 @@ def _build_single_wm_composite(
     dhdt_directory: pathlib.Path,
     radiation_directory: pathlib.Path,
     z_directory: pathlib.Path,
+    t2m_directory: pathlib.Path,
+    q_directory: pathlib.Path,
     vorticity_directory: pathlib.Path,
     output_directory: pathlib.Path,
     flux_lat: npt.NDArray,
@@ -168,6 +176,8 @@ def _build_single_wm_composite(
     composite_swabs = np.zeros((12, n_box, n_box), float)
     composite_olr = np.zeros((12, n_box, n_box), float)
     composite_z = np.zeros((12, n_box, n_box), float)
+    composite_t = np.zeros((12, n_box, n_box), float)
+    composite_q = np.zeros((12, n_box, n_box), float)
     composite_vo = np.zeros((12, n_vo, n_vo), float)
     number_of_cyclones = np.zeros(12, float)
     composite_lat_saved = None
@@ -326,6 +336,39 @@ def _build_single_wm_composite(
                 / constants.GRAVITY
             )
 
+        # 2-m temperature
+        with netCDF4.Dataset(
+            str(
+                t2m_directory
+                / ("era5_t2m_%d_%s.6hrly.nc" % (year, month_str))
+            )
+        ) as ds:
+            a_t = np.where(ds["latitude"][:] == lat_max)
+            b_t = np.where(ds["latitude"][:] == lat_min)
+            if len(a_t[0]) > 0 and len(b_t[0]) > 0:
+                composite_t[pythonic_month, :, :] += ds["t2m"][
+                    day_of_month,
+                    int(a_t[0][0]) : int(b_t[0][0]),
+                    c_i:d_i,
+                ]
+
+        # 850 hPa specific humidity
+        with netCDF4.Dataset(
+            str(
+                q_directory
+                / ("era5_q_%d_%s.6hrly.nc" % (year, month_str))
+            )
+        ) as ds:
+            a_q = np.where(ds["latitude"][:] == lat_max)
+            b_q = np.where(ds["latitude"][:] == lat_min)
+            if len(a_q[0]) > 0 and len(b_q[0]) > 0:
+                composite_q[pythonic_month, :, :] += ds["q"][
+                    day_of_month,
+                    _Q_LEVEL_INDEX,
+                    int(a_q[0][0]) : int(b_q[0][0]),
+                    c_i:d_i,
+                ]
+
         # Filtered vorticity (coarse 1.5° grid)
         if lon_max_small < 360 and lon_min_small >= 0:
             a_vo_flip = np.where(vo_lats == lat_min_small)
@@ -372,6 +415,8 @@ def _build_single_wm_composite(
         composite_swabs=composite_swabs,
         composite_olr=composite_olr,
         composite_z=composite_z,
+        composite_t=composite_t,
+        composite_q=composite_q,
         composite_vo=composite_vo,
         number_of_cyclones=number_of_cyclones,
     )
@@ -407,6 +452,8 @@ def _save_wm_composite(
     composite_swabs: npt.NDArray,
     composite_olr: npt.NDArray,
     composite_z: npt.NDArray,
+    composite_t: npt.NDArray,
+    composite_q: npt.NDArray,
     composite_vo: npt.NDArray,
     number_of_cyclones: npt.NDArray,
 ) -> None:
@@ -432,6 +479,8 @@ def _save_wm_composite(
         swabs_var = wfile.createVariable("composite_Swabs", "f4", ("month", "lat", "lon"))
         olr_var = wfile.createVariable("composite_Olr", "f4", ("month", "lat", "lon"))
         z_var = wfile.createVariable("composite_Z", "f4", ("month", "lat", "lon"))
+        t_var = wfile.createVariable("composite_T", "f4", ("month", "lat", "lon"))
+        q_var = wfile.createVariable("composite_Q", "f4", ("month", "lat", "lon"))
         vo_var = wfile.createVariable("composite_VO", "f4", ("month", "lat", "lon"))
         number_var = wfile.createVariable("number", "f4", ("month",))
 
@@ -454,6 +503,8 @@ def _save_wm_composite(
                 swabs_var[month_idx, :, :] = composite_swabs[month_idx, :, :] / n
                 olr_var[month_idx, :, :] = composite_olr[month_idx, :, :] / n
                 z_var[month_idx, :, :] = composite_z[month_idx, :, :] / n
+                t_var[month_idx, :, :] = composite_t[month_idx, :, :] / n
+                q_var[month_idx, :, :] = composite_q[month_idx, :, :] / n
                 # Interpolate VO from 20×20 to 120×120
                 spline = scipy.interpolate.RectBivariateSpline(
                     x_vo, x_vo, composite_vo[month_idx, :, :], kx=1, ky=1,

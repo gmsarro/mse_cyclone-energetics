@@ -33,3 +33,33 @@ VORTICITY_THRESHOLD: float = 0.225
 DISTANCE_THRESHOLD: float = 1.5e6
 
 PW_TO_WM2_FACTOR: float = 1e-15
+
+# Monthly storm-track latitude (Jan–Dec) for the latitude-band filter used
+# in cyclone-centred compositing.  Values are the monthly-mean latitude of
+# the TE peak from the 2000–2014 analysis.
+STORM_LAT_SH: np.ndarray = np.array([
+    -45.39914645, -46.33174147, -46.37381343, -45.16073870,
+    -43.76535216, -42.89586507, -43.20439275, -43.73730419,
+    -43.30957264, -43.05714090, -43.84248408, -45.04854682,
+], dtype=float)
+
+# NH counterpart — monthly-mean latitude of the TE peak.
+STORM_LAT_NH: np.ndarray = np.array([
+    45.0, 45.5, 44.5, 43.0, 42.0, 41.5,
+    41.0, 41.5, 42.0, 43.0, 44.0, 45.0,
+], dtype=float)
+
+STORM_LAT_BAND_HALF_WIDTH: float = 5.0
+
+# No-leap month lengths and cumulative boundaries (used by the AI composites)
+NOLEAP_MONTH_LENGTHS: np.ndarray = np.array(
+    [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31], dtype=int
+)
+NOLEAP_MONTH_CUMULATIVE: np.ndarray = np.concatenate(
+    [[0], np.cumsum(NOLEAP_MONTH_LENGTHS)]
+)
+
+# Hoskins spectral filter parameters (for smoothing)
+HOSKINS_N0: int = 60
+HOSKINS_R: int = 1
+HOSKINS_NTRUNC: int = 100

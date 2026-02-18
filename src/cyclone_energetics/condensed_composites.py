@@ -120,12 +120,16 @@ def create_condensed_composites(
         z_all = _read_monthly_3d(dataset=dsa, name="composite_Z")
         vo_all = _read_monthly_3d(dataset=dsa, name="composite_VO")
         shf_all = _read_monthly_3d(dataset=dsa, name="composite_Shf")
+        t_all = _read_monthly_3d(dataset=dsa, name="composite_T")
+        q_all = _read_monthly_3d(dataset=dsa, name="composite_Q")
         n_all_full = _read_count_12(dataset=dsa)
 
     with netCDF4.Dataset(str(intense_full_path)) as dsi:
         z_int = _read_monthly_3d(dataset=dsi, name="composite_Z")
         vo_int = _read_monthly_3d(dataset=dsi, name="composite_VO")
         shf_int = _read_monthly_3d(dataset=dsi, name="composite_Shf")
+        t_int = _read_monthly_3d(dataset=dsi, name="composite_T")
+        q_int = _read_monthly_3d(dataset=dsi, name="composite_Q")
         n_int_full = _read_count_12(dataset=dsi)
 
     n_wk_full = n_all_full - n_int_full
@@ -140,6 +144,14 @@ def create_condensed_composites(
     shf_wk = (
         shf_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
         - shf_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
+    )
+    t_wk = (
+        t_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
+        - t_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
+    )
+    q_wk = (
+        q_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
+        - q_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
     )
 
     wgt = _build_weight_cube(
@@ -162,6 +174,8 @@ def create_condensed_composites(
     shf_local = np.stack([shf_local_int, shf_local_wk], axis=0).astype(np.float32)
     z_arr = np.stack([z_int, z_wk], axis=0).astype(np.float32)
     vo_arr = np.stack([vo_int, vo_wk], axis=0).astype(np.float32)
+    t_arr = np.stack([t_int, t_wk], axis=0).astype(np.float32)
+    q_arr = np.stack([q_int, q_wk], axis=0).astype(np.float32)
     count_track = np.stack([cnt_int_track, cnt_wk_track], axis=0).astype(np.float64)
     count_full = np.stack([n_int_full, n_wk_full], axis=0).astype(np.float64)
 
@@ -195,6 +209,16 @@ def create_condensed_composites(
                 ("category", "month", "lat", "lon"),
                 vo_arr,
                 {"long_name": "Vorticity composite"},
+            ),
+            "T": (
+                ("category", "month", "lat", "lon"),
+                t_arr,
+                {"units": "K", "long_name": "2-m temperature composite"},
+            ),
+            "Q": (
+                ("category", "month", "lat", "lon"),
+                q_arr,
+                {"units": "kg kg-1", "long_name": "Specific humidity at 850 hPa composite"},
             ),
             "count_track": (
                 ("category", "month"),

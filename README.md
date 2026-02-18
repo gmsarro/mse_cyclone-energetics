@@ -33,7 +33,7 @@ cyclone_energetics/
     ├── flux_computation.py     # Step 1a  — transient-eddy flux divergence
     ├── storage_computation.py  # Step 1b  — MSE storage term (dh/dt)
     ├── zonal_advection.py      # Step 1c  — zonal MSE advection divergence
-    ├── smoothing.py            # Step 2   — CDO-based field smoothing
+    ├── smoothing.py            # Step 2   — CDO regridding & Hoskins spectral filter
     ├── track_processing.py     # Step 3   — TRACK algorithm post-processing
     ├── masking.py              # Step 4   — cyclone/anticyclone masks
     ├── integration.py          # Step 5   — poleward flux integration
@@ -89,9 +89,10 @@ documented via `--help`.
         ├─── Step 1c: compute-zonal-mse ──► Zonal MSE advection files
         │
         ▼
- ┌──────────────┐
- │  Step 2: smooth (CDO remapbil)  │──► Smoothed vint / dh/dt fields
- └──────┬───────┘
+ ┌─────────────────────────────────────────────────┐
+ │  Step 2a: smooth-cdo (CDO remapbil)             │──► Regridded fields
+ │  Step 2b: smooth-hoskins (Hoskins spectral)     │──► Spectrally filtered TE/vint/dh/dt
+ └──────┬──────────────────────────────────────────┘
         │
         │  TRACK output
         │       │
@@ -198,8 +199,11 @@ to point to the directory containing the pipeline output.
 * **Vectorised integration** — Poleward integration operates on full
   `(time, lat, lon)` arrays in a single pass (no Python loops over
   timesteps or longitudes).
-* **CDO smoothing** — Field smoothing and regridding delegate to CDO
-  (`cdo remapbil`) for throughput and memory efficiency.
+* **Two-stage smoothing** — Raw ERA5 fields are regridded with CDO
+  (`cdo remapbil`); derived fields (TE, vint, dh/dt) are spectrally
+  smoothed with a Hoskins filter (n₀ = 60, r = 1, truncation T100),
+  implemented in Python via spherical-harmonic transforms (replaces the
+  original NCL scripts).
 * **Complete energy budget** — The pipeline computes every term of the
   cyclone-centred MSE energy budget: transient eddy (TE), surface heat
   flux (SHF), radiation (Swabs, OLR), MSE storage (dh/dt), and zonal

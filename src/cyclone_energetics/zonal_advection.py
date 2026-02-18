@@ -22,6 +22,9 @@ import cyclone_energetics.flux_computation as flux_computation
 
 _LOG = logging.getLogger(__name__)
 
+# np.trapz was removed in NumPy 2.0; np.trapezoid is the replacement.
+_trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]
+
 _LATITUDE_CHUNK_SIZE: int = 72
 
 
@@ -124,7 +127,7 @@ def _process_single_month_zonal(
 
         sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
         dvmsedt[:, lat_start:lat_end, :] = (
-            sign / constants.GRAVITY * np.trapz(te_flux, pa3d, axis=1)
+            sign / constants.GRAVITY * _trapz(te_flux, pa3d, axis=1)
         )
         del te_flux, pa3d
         _LOG.info("  Vertical integration completed for block %s", lat_block)
