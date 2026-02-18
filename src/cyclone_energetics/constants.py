@@ -18,10 +18,12 @@ MONTH_BOUNDARIES: np.ndarray = np.array(
 )
 TIMESTEPS_PER_YEAR: int = 1460
 
-MONTH_STRINGS: list[str] = [
+import typing
+
+MONTH_STRINGS: typing.List[str] = [
     "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"
 ]
-MONTH_NAMES: list[str] = [
+MONTH_NAMES: typing.List[str] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ]

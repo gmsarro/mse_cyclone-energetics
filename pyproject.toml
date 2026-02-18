@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "cyclone-energetics"
 version = "1.0.0"
-description = "Cyclone energetics analysis pipeline: flux computation, cyclone tracking, masking, integration, composites, and figure generation."
+description = "A localized Moist Static Energy budget to quantify what drives the seasonality of intense cyclones."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}

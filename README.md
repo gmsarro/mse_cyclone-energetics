@@ -1,16 +1,18 @@
-# Cyclone Energetics
+# A Localized Moist Static Energy Budget for Cyclone Seasonality
 
 > **What Controls the Seasonality of Intense Cyclones?**
 > Giorgio M. Sarro, Pragallva Barpanda, Tiffany A. Shaw
 > *Manuscript submitted to Geophysical Research Letters*
 
-Analysis pipeline for the **cyclone-centred MSE energy budget** and the
-seasonal cycle of poleward energy transport.  Starting from ERA5
-reanalysis and TRACK algorithm output, this package computes every
-intermediate field — transient-eddy fluxes, zonal MSE advection, the MSE
-storage term, smoothed vint/dh/dt fields, cyclone masks, poleward
-integrations, and intensity-binned composites — and produces the seven
-figures presented in the paper.
+We derive a **new localized Moist Static Energy (MSE) budget** to
+quantify what drives the seasonality of intense cyclones.  This
+repository contains the complete analysis pipeline — from raw ERA5
+reanalysis to final publication figures.  Starting from 6-hourly ERA5
+fields and TRACK algorithm output, the code computes every term of the
+budget (transient-eddy flux divergence, surface heat fluxes, radiation,
+MSE storage, zonal MSE advection), applies cyclone masks, performs
+poleward integrations, bins by cyclone intensity, builds cyclone-centred
+composites, and generates all seven figures presented in the paper.
 
 ---
 
@@ -61,7 +63,7 @@ The pipeline requires:
 
 | Dataset | Description |
 |---------|-------------|
-| **ERA5 6-hourly fields** | `t`, `q`, `ps`, `z`, `v`, `u`, `tsr`, `ssr`, `ttr`, `vint` (vertically integrated fluxes) — one NetCDF per month |
+| **ERA5 6-hourly fields** | `t`, `q`, `ps`, `z`, `v`, `u`, `tsr`, `ssr`, `ttr`, `slhf`, `sshf`, `vint` (vertically integrated fluxes) — one NetCDF per month |
 | **TRACK output** | Cyclone and anticyclone track files (`TRACK_VO_anom_T42_ERA5_*.nc`, `ANTIC_VO_anom_T42_ERA5_*.nc`) |
 | **Filtered vorticity** | T42 vorticity fields produced by the TRACK algorithm (`VO.anom.T42.*.nc`) |
 

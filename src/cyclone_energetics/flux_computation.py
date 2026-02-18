@@ -189,7 +189,7 @@ def _process_single_month_te(
         te_flux = v_prime * mse_prime * beta * beta
         del v_prime, mse_prime, beta
 
-        sign = -1.0 if plev[1] - plev[0] > 0 else 1.0
+        sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
         dvmsedt[:, lat_start:lat_end, :] = (
             sign / constants.GRAVITY * np.trapz(te_flux, pa3d, axis=1)
         )

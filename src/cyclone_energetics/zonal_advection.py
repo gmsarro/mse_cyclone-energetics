@@ -122,7 +122,7 @@ def _process_single_month_zonal(
         te_flux = u * mse * beta * beta
         del u, mse, beta
 
-        sign = -1.0 if plev[1] - plev[0] > 0 else 1.0
+        sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
         dvmsedt[:, lat_start:lat_end, :] = (
             sign / constants.GRAVITY * np.trapz(te_flux, pa3d, axis=1)
         )
@@ -171,9 +171,9 @@ def _compute_zonal_divergence(
 
     (1 / (a * cos(lat))) * d/dlon [field]
 
+    Fully vectorised over time (no Python loops).
     Input shape: ``(n_time, n_lat, n_lon)``
     """
-    n_time = field.shape[0]
     n_lon = longitude.shape[0]
 
     lon_mod = np.zeros(n_lon + 2)
@@ -185,15 +185,13 @@ def _compute_zonal_divergence(
     lat_rad = np.deg2rad(latitude)
     cos_lat = np.cos(lat_rad)
 
-    # Pad field with periodic boundaries along longitude
-    field_padded = np.zeros((n_time, len(latitude), n_lon + 2), dtype=field.dtype)
+    field_padded = np.empty(
+        (field.shape[0], len(latitude), n_lon + 2), dtype=field.dtype
+    )
     field_padded[:, :, 1:-1] = field
     field_padded[:, :, 0] = field[:, :, -1]
     field_padded[:, :, -1] = field[:, :, 0]
 
-    te_div = np.zeros_like(field)
-    for t in range(n_time):
-        grad_lon = np.gradient(field_padded[t, :, :], lon_rad, axis=1)
-        te_div[t, :, :] = (grad_lon / (constants.EARTH_RADIUS * cos_lat[:, np.newaxis]))[:, 1:-1]
-
-    return te_div
+    grad_lon = np.gradient(field_padded, lon_rad, axis=2)
+    cos_3d = cos_lat[np.newaxis, :, np.newaxis]
+    return (grad_lon / (constants.EARTH_RADIUS * cos_3d))[:, :, 1:-1]
