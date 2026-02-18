@@ -23,6 +23,8 @@ cyclone_energetics/
 ├── pyproject.toml              # Package metadata and dependencies
 ├── README.md
 ├── LICENSE
+├── ncl/
+│   └── hoskins_filter.ncl     # NCL Hoskins spectral filter (driven by smoothing.py)
 ├── notebooks/
 │   └── final_figures.ipynb     # Notebook that generates every paper figure
 └── src/cyclone_energetics/
@@ -33,7 +35,7 @@ cyclone_energetics/
     ├── flux_computation.py     # Step 1a  — transient-eddy flux divergence
     ├── storage_computation.py  # Step 1b  — MSE storage term (dh/dt)
     ├── zonal_advection.py      # Step 1c  — zonal MSE advection divergence
-    ├── smoothing.py            # Step 2   — CDO regridding & Hoskins spectral filter
+    ├── smoothing.py            # Step 2   — CDO regridding & NCL Hoskins spectral filter
     ├── track_processing.py     # Step 3   — TRACK algorithm post-processing
     ├── masking.py              # Step 4   — cyclone/anticyclone masks
     ├── integration.py          # Step 5   — poleward flux integration
@@ -53,8 +55,9 @@ cd mse_cyclone-energetics
 pip install -e ".[dev]"
 ```
 
-Requires **Python ≥ 3.10** and [CDO](https://code.mpimet.mpg.de/projects/cdo)
-(for the smoothing step).
+Requires **Python ≥ 3.10**, [CDO](https://code.mpimet.mpg.de/projects/cdo)
+(for regridding), and [NCL](https://www.ncl.ucar.edu/) (for the Hoskins
+spectral filter).
 
 ---
 
@@ -201,9 +204,10 @@ to point to the directory containing the pipeline output.
   timesteps or longitudes).
 * **Two-stage smoothing** — Raw ERA5 fields are regridded with CDO
   (`cdo remapbil`); derived fields (TE, vint, dh/dt) are spectrally
-  smoothed with a Hoskins filter (n₀ = 60, r = 1, truncation T100),
-  implemented in Python via spherical-harmonic transforms (replaces the
-  original NCL scripts).
+  smoothed with a Hoskins filter (n₀ = 60, r = 1, truncation T100)
+  using NCL's built-in spherical-harmonic routines (`shaeC` / `shseC`).
+  Python drives the NCL script (`ncl/hoskins_filter.ncl`) by passing
+  all parameters via environment variables.
 * **Complete energy budget** — The pipeline computes every term of the
   cyclone-centred MSE energy budget: transient eddy (TE), surface heat
   flux (SHF), radiation (Swabs, OLR), MSE storage (dh/dt), and zonal

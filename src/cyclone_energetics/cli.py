@@ -159,7 +159,7 @@ def smooth_cdo(
 
 
 # -----------------------------------------------------------------------
-# Step 2b — Hoskins spectral filter (replaces NCL scripts)
+# Step 2b — Hoskins spectral filter (drives NCL)
 # -----------------------------------------------------------------------
 @app.command()
 def smooth_hoskins(
@@ -191,7 +191,7 @@ def smooth_hoskins(
         int, typer.Option(help="Maximum total wavenumber for Hoskins filter")
     ] = constants.HOSKINS_NTRUNC,
 ) -> None:
-    """Step 2b: Apply the Hoskins spectral filter to TE, dh/dt, and vint."""
+    """Step 2b: Apply the Hoskins spectral filter (NCL) to TE, dh/dt, and vint."""
     _setup_logging()
     print("Applying Hoskins spectral filter")
     smoothing.smooth_all_pipeline_fields(
