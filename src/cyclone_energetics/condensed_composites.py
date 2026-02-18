@@ -119,13 +119,13 @@ def create_condensed_composites(
         lon_ref = dsa["lon"][:]
         z_all = _read_monthly_3d(dataset=dsa, name="composite_Z")
         vo_all = _read_monthly_3d(dataset=dsa, name="composite_VO")
-        slhf_all = _read_monthly_3d(dataset=dsa, name="composite_SLHF")
+        shf_all = _read_monthly_3d(dataset=dsa, name="composite_Shf")
         n_all_full = _read_count_12(dataset=dsa)
 
     with netCDF4.Dataset(str(intense_full_path)) as dsi:
         z_int = _read_monthly_3d(dataset=dsi, name="composite_Z")
         vo_int = _read_monthly_3d(dataset=dsi, name="composite_VO")
-        slhf_int = _read_monthly_3d(dataset=dsi, name="composite_SLHF")
+        shf_int = _read_monthly_3d(dataset=dsi, name="composite_Shf")
         n_int_full = _read_count_12(dataset=dsi)
 
     n_wk_full = n_all_full - n_int_full
@@ -137,9 +137,9 @@ def create_condensed_composites(
         vo_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
         - vo_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
     )
-    slhf_wk = (
-        slhf_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
-        - slhf_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
+    shf_wk = (
+        shf_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
+        - shf_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
     )
 
     wgt = _build_weight_cube(
@@ -151,9 +151,11 @@ def create_condensed_composites(
     i_l_wk = te_wk_pw / wgt
     i_shf_wk = shf_wk_pw / wgt
 
-    slhf_conv = 2.26e6 * 0.00118 * 1.22 * 2.0
-    shf_local_int = slhf_int * slhf_conv
-    shf_local_wk = slhf_wk * slhf_conv
+    # SHF is computed as a residual from the MSE budget:
+    # SHF = column_MSE - Swabs - OLR + dh/dt
+    # Already in W/m^2 from the compositing step.
+    shf_local_int = shf_int
+    shf_local_wk = shf_wk
 
     i_l = np.stack([i_l_int, i_l_wk], axis=0).astype(np.float32)
     i_shf = np.stack([i_shf_int, i_shf_wk], axis=0).astype(np.float32)

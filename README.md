@@ -63,7 +63,7 @@ The pipeline requires:
 
 | Dataset | Description |
 |---------|-------------|
-| **ERA5 6-hourly fields** | `t`, `q`, `ps`, `z`, `v`, `u`, `tsr`, `ssr`, `ttr`, `slhf`, `sshf`, `vint` (vertically integrated fluxes) — one NetCDF per month |
+| **ERA5 6-hourly fields** | `t`, `q`, `ps`, `z`, `v`, `u`, `tsr`, `ssr`, `ttr`, `vint` (vertically integrated fluxes), `t2m` — one NetCDF per month |
 | **TRACK output** | Cyclone and anticyclone track files (`TRACK_VO_anom_T42_ERA5_*.nc`, `ANTIC_VO_anom_T42_ERA5_*.nc`) |
 | **Filtered vorticity** | T42 vorticity fields produced by the TRACK algorithm (`VO.anom.T42.*.nc`) |
 

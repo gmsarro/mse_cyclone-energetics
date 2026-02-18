@@ -58,7 +58,7 @@ def smooth_era5_fields(
                     cmd, capture_output=True, text=True, check=False
                 )
                 if result.returncode != 0:
-                    _LOG.exception(
+                    _LOG.error(
                         "CDO smoothing failed for %s: %s",
                         infile,
                         result.stderr,
