@@ -166,6 +166,7 @@ def integrate_fluxes_poleward(
     vint_directory: pathlib.Path,
     radiation_directory: pathlib.Path,
     output_directory: pathlib.Path,
+    adv_mse_directory: pathlib.Path | None = None,
 ) -> None:
     output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -201,8 +202,6 @@ def integrate_fluxes_poleward(
                 vimdf = np.array(ds_vint[vn["vimdf"]][:max_day, ::-1, :])
                 vithed = np.array(ds_vint[vn["vithed"]][:max_day, ::-1, :])
 
-            # Use latitude from the TE file for all integrations, matching
-            # the original code (make_TE_int_2025.py line: latitude = np.copy(lat))
             latitude = np.copy(np.asarray(lat))
 
             tot_energy = (
@@ -257,6 +256,34 @@ def integrate_fluxes_poleward(
                 f_te=batch["te"],
             )
 
+            # Advective MSE integration (u_mse, v_mse)
+            f_u_mse_int = None
+            f_v_mse_int = None
+            if adv_mse_directory is not None:
+                adv_path = adv_mse_directory / (
+                    "Adv_%d_%s_filtered.nc" % (year, month)
+                )
+                if adv_path.exists():
+                    with netCDF4.Dataset(str(adv_path)) as ds_adv:
+                        adv_lat = np.array(ds_adv["latitude"][::-1], dtype=np.float64)
+                        adv_lon = np.array(ds_adv["longitude"][:], dtype=np.float64)
+                        u_mse_raw = np.nan_to_num(
+                            np.array(ds_adv["u_mse_filtered"][:max_day, ::-1, :], dtype=np.float64),
+                            nan=0.0,
+                        )
+                        v_mse_raw = np.nan_to_num(
+                            np.array(ds_adv["v_mse_filtered"][:max_day, ::-1, :], dtype=np.float64),
+                            nan=0.0,
+                        )
+
+                    adv_batch = _poleward_integrate_batch(
+                        fields={"u_mse": u_mse_raw, "v_mse": v_mse_raw},
+                        latitude=adv_lat,
+                    )
+                    f_u_mse_int = adv_batch["u_mse"]
+                    f_v_mse_int = adv_batch["v_mse"]
+                    _LOG.info("Advective MSE integration done for year=%s month=%s", year, month)
+
             _save_new_integrated_fluxes(
                 output_path=output_directory
                 / ("New_Integrated_Fluxes_%d_%s_.nc" % (year, month)),
@@ -264,6 +291,8 @@ def integrate_fluxes_poleward(
                 lon=lon,
                 time_vals=time_vals,
                 f_dhdt=batch["dhdt"],
+                f_u_mse=f_u_mse_int,
+                f_v_mse=f_v_mse_int,
             )
 
 
@@ -323,6 +352,8 @@ def _save_new_integrated_fluxes(
     lon: npt.NDArray,
     time_vals: npt.NDArray,
     f_dhdt: npt.NDArray,
+    f_u_mse: npt.NDArray | None = None,
+    f_v_mse: npt.NDArray | None = None,
 ) -> None:
     with netCDF4.Dataset(str(output_path), "w", format="NETCDF3_CLASSIC") as wfile:
         wfile.createDimension("lon", len(lon))
@@ -348,4 +379,17 @@ def _save_new_integrated_fluxes(
         lon_var[:] = lon
         time_var[:] = time_vals
         dhdt_var[:, :, :] = f_dhdt
+
+        if f_u_mse is not None:
+            u_mse_var = wfile.createVariable(
+                "F_u_mse_final", "f4", ("time", "lat", "lon")
+            )
+            u_mse_var[:, :, :] = f_u_mse
+
+        if f_v_mse is not None:
+            v_mse_var = wfile.createVariable(
+                "F_v_mse_final", "f4", ("time", "lat", "lon")
+            )
+            v_mse_var[:, :, :] = f_v_mse
+
     _LOG.info("Saved new integrated fluxes: %s", output_path)

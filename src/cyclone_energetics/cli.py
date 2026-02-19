@@ -137,6 +137,12 @@ def smooth_hoskins(
     output_vint_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for filtered vint files")
     ],
+    adv_mse_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with raw advective MSE files (Adv_YYYY_MM.nc)")
+    ] = None,
+    output_adv_mse_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Output directory for filtered advective MSE files")
+    ] = None,
     year_start: typing_extensions.Annotated[
         int, typer.Option(help="Start year (inclusive)")
     ] = 2000,
@@ -147,15 +153,16 @@ def smooth_hoskins(
         int, typer.Option(help="Maximum total wavenumber for Hoskins filter")
     ] = constants.HOSKINS_NTRUNC,
 ) -> None:
-    """Step 2: Apply the Hoskins spectral filter to dh/dt and vint fields.
+    """Step 2: Apply the Hoskins spectral filter to dh/dt, vint, and advective MSE fields.
 
     The transient-eddy (TE) divergence is NOT smoothed; the monthly
-    anomaly product is already sufficiently smooth.  Only dh/dt and the
-    ERA5 vertically-integrated energy terms (vigd, vimdf, vithed) are
-    filtered before meridional integration.
+    anomaly product is already sufficiently smooth.  Only dh/dt, the
+    ERA5 vertically-integrated energy terms (vigd, vimdf, vithed), and
+    the advective MSE (u_mse, v_mse) are filtered before meridional
+    integration.
     """
     _setup_logging()
-    print("Applying Hoskins spectral filter to dh/dt and vint fields")
+    print("Applying Hoskins spectral filter to dh/dt, vint, and advective MSE fields")
     smoothing.smooth_all_pipeline_fields(
         year_start=year_start,
         year_end=year_end,
@@ -163,6 +170,8 @@ def smooth_hoskins(
         vint_directory=vint_directory,
         output_dhdt_directory=output_dhdt_directory,
         output_vint_directory=output_vint_directory,
+        adv_mse_directory=adv_mse_directory,
+        output_adv_mse_directory=output_adv_mse_directory,
         ntrunc=ntrunc,
     )
     print("Done.")
@@ -252,6 +261,9 @@ def integrate_fluxes(
     output_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for integrated fluxes")
     ],
+    adv_mse_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with Hoskins-filtered advective MSE files (Adv_YYYY_MM_filtered.nc)")
+    ] = None,
     year_start: typing_extensions.Annotated[
         int, typer.Option(help="Start year (inclusive)")
     ] = 2000,
@@ -270,6 +282,7 @@ def integrate_fluxes(
         vint_directory=vint_directory,
         radiation_directory=radiation_directory,
         output_directory=output_directory,
+        adv_mse_directory=adv_mse_directory,
     )
     print("Done.")
 

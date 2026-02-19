@@ -124,6 +124,36 @@ def hoskins_spectral_smooth(
     _LOG.info("Saved Hoskins-filtered file: %s", output_path)
 
 
+def _detect_vint_variable_names(
+    vint_path: pathlib.Path,
+) -> tuple[list[str], list[str]]:
+    """Return (input_names, output_names) for the three vint variables.
+
+    ERA5 CDS changed variable names around 2022.  Older files use GRIB
+    parameter IDs (p85.162, p84.162, p83.162) while newer files use short
+    names (vigd, vimdf, vithed).  We check which convention the file uses.
+    """
+    import netCDF4
+
+    with netCDF4.Dataset(str(vint_path)) as ds:
+        keys = list(ds.variables.keys())
+
+    if "vigd" in keys:
+        return (
+            ["vigd", "vimdf", "vithed"],
+            ["vigd_filtered", "vimdf_filtered", "vithed_filtered"],
+        )
+    if "p85.162" in keys:
+        return (
+            ["p85.162", "p84.162", "p83.162"],
+            ["p85.162_filtered", "p84.162_filtered", "p83.162_filtered"],
+        )
+    raise KeyError(
+        "Cannot detect vint variable names in %s. Available: %s"
+        % (vint_path, keys)
+    )
+
+
 def smooth_all_pipeline_fields(
     *,
     year_start: int,
@@ -132,27 +162,30 @@ def smooth_all_pipeline_fields(
     vint_directory: pathlib.Path,
     output_dhdt_directory: pathlib.Path,
     output_vint_directory: pathlib.Path,
+    adv_mse_directory: pathlib.Path | None = None,
+    output_adv_mse_directory: pathlib.Path | None = None,
     ntrunc: int = constants.HOSKINS_NTRUNC,
 ) -> None:
     """Apply the Hoskins spectral filter to all pipeline fields.
 
-    This replaces the NCL scripts ``smooth_vint.ncl`` and
-    ``smooth_dh_dt_ERA5.ncl``.
+    This replaces the NCL scripts ``smooth_vint.ncl``,
+    ``smooth_dh_dt_ERA5.ncl``, and ``smooth_adv_mse.ncl``.
 
     The transient-eddy (TE) divergence is **not** smoothed; it is
     already sufficiently smooth from the monthly anomaly computation.
 
-    Only dh/dt and the ERA5 vertically-integrated energy terms (vint)
-    are filtered.  Smoothed files are written with a ``_filtered``
-    suffix in the output directories.
+    Filtered fields: dh/dt, ERA5 vertically-integrated energy terms
+    (vint), and advective MSE (u_mse + v_mse).
     """
     output_dhdt_directory.mkdir(parents=True, exist_ok=True)
     output_vint_directory.mkdir(parents=True, exist_ok=True)
+    if output_adv_mse_directory is not None:
+        output_adv_mse_directory.mkdir(parents=True, exist_ok=True)
 
     for year in range(year_start, year_end):
         for month in constants.MONTH_STRINGS:
-            # dh/dt files
-            dhdt_in = dhdt_directory / ("tend_%d_%s.nc" % (year, month))
+            # dh/dt files — the storage computation writes tend_YYYY_MM_2.nc
+            dhdt_in = dhdt_directory / ("tend_%d_%s_2.nc" % (year, month))
             dhdt_out = output_dhdt_directory / ("tend_%d_%s_filtered_2.nc" % (year, month))
             if dhdt_in.exists():
                 hoskins_spectral_smooth(
@@ -163,20 +196,35 @@ def smooth_all_pipeline_fields(
                     ntrunc=ntrunc,
                 )
 
-            # Vint files (three variables)
+            # Vint files (three variables).
+            # ERA5 CDS changed variable names circa 2022: older files use
+            # GRIB parameter IDs (p85.162, p84.162, p83.162) while newer
+            # files use the short names (vigd, vimdf, vithed).
             vint_in = vint_directory / ("era5_vint_%d_%s.6hrly.nc" % (year, month))
             vint_out = output_vint_directory / (
                 "era5_vint_%d_%s_filtered.nc" % (year, month)
             )
             if vint_in.exists():
+                vint_varnames, vint_outnames = _detect_vint_variable_names(vint_in)
                 hoskins_spectral_smooth(
                     input_path=vint_in,
                     output_path=vint_out,
-                    variable_names=["vigd", "vimdf", "vithed"],
-                    output_variable_names=[
-                        "vigd_filtered",
-                        "vimdf_filtered",
-                        "vithed_filtered",
-                    ],
+                    variable_names=vint_varnames,
+                    output_variable_names=vint_outnames,
                     ntrunc=ntrunc,
                 )
+
+            # Advective MSE files (u_mse + v_mse).
+            if adv_mse_directory is not None and output_adv_mse_directory is not None:
+                adv_in = adv_mse_directory / ("Adv_%d_%s.nc" % (year, month))
+                adv_out = output_adv_mse_directory / (
+                    "Adv_%d_%s_filtered.nc" % (year, month)
+                )
+                if adv_in.exists():
+                    hoskins_spectral_smooth(
+                        input_path=adv_in,
+                        output_path=adv_out,
+                        variable_names=["v_mse", "u_mse"],
+                        output_variable_names=["v_mse_filtered", "u_mse_filtered"],
+                        ntrunc=ntrunc,
+                    )

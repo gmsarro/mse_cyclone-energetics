@@ -88,14 +88,14 @@ documented via `--help`.
         │
         ├─── Step 1a: compute-te ──────────► TE divergence (not smoothed)
         ├─── Step 1b: compute-dhdt ────────► dh/dt files
-        ├─── Step 1c: compute-zonal-mse ──► Zonal MSE advection files
+        ├─── Step 1c: compute-zonal-mse ──► Advective MSE files (u_mse + v_mse)
         │
         ▼
- ┌──────────────────────────────────────────────────────┐
- │  Step 2: smooth-hoskins (Hoskins spectral filter)    │
- │  → filters dh/dt and ERA5 vint fields only           │
- │  → TE is NOT smoothed (already smooth from anomaly)  │
- └──────┬───────────────────────────────────────────────┘
+ ┌───────────────────────────────────────────────────────────┐
+ │  Step 2: smooth-hoskins (Hoskins spectral filter)         │
+ │  → filters dh/dt, ERA5 vint fields, and advective MSE    │
+ │  → TE is NOT smoothed (already smooth from anomaly)       │
+ └──────┬────────────────────────────────────────────────────┘
         │
         │  TRACK output
         │       │
@@ -106,11 +106,12 @@ documented via `--help`.
         │  Step 4: create-masks ────────► Cyclone/anticyclone masks
         │       │
         ▼       ▼
- ┌─────────────────────────────────┐
- │  Step 5: integrate-fluxes       │──► Poleward-integrated flux NetCDFs
- │  (raw TE + smoothed dh/dt       │    (in PW)
- │   + smoothed vint + radiation)  │
- └──────┬──────────────────────────┘
+ ┌──────────────────────────────────────┐
+ │  Step 5: integrate-fluxes            │──► Poleward-integrated flux NetCDFs
+ │  (raw TE + smoothed dh/dt            │    (in PW)
+ │   + smoothed vint + radiation        │
+ │   + smoothed advective MSE)          │
+ └──────┬───────────────────────────────┘
         │
         ▼
  ┌─────────────────────────────────┐
@@ -217,8 +218,8 @@ to point to the directory containing the pipeline output.
   already sufficiently smooth.
 * **Complete energy budget** — The pipeline computes every term of the
   cyclone-centred MSE energy budget: transient eddy (TE), surface heat
-  flux (SHF), radiation (Swabs, OLR), MSE storage (dh/dt), and zonal
-  MSE advection.
+  flux (SHF), radiation (Swabs, OLR), MSE storage (dh/dt), zonal MSE
+  advection (u_mse), and meridional MSE advection (v_mse).
 * **SHF as a residual** — The surface heat flux (SHF) in W m⁻² is
   calculated as a residual of the MSE budget:
   `SHF = (vigd + vimdf·Lv + vithed) − (TSR − SSR) − TTR + dh/dt`.

@@ -20,6 +20,8 @@ _FLUX_NAMES: list[str] = [
     "F_Dhdt",
     "F_Shf",
     "F_TE",
+    "F_u_mse",
+    "F_v_mse",
 ]
 
 _N_LAT_ERA5: int = 719
@@ -188,6 +190,14 @@ def _load_monthly_fluxes(
         )
     ) as ds:
         result["F_Dhdt"] = ds["F_Dhdt_final"][:max_day, :, :]
+        if "F_u_mse_final" in ds.variables:
+            result["F_u_mse"] = ds["F_u_mse_final"][:max_day, :, :]
+        else:
+            result["F_u_mse"] = np.zeros_like(result["F_Dhdt"])
+        if "F_v_mse_final" in ds.variables:
+            result["F_v_mse"] = ds["F_v_mse_final"][:max_day, :, :]
+        else:
+            result["F_v_mse"] = np.zeros_like(result["F_Dhdt"])
 
     return result
 
