@@ -10,6 +10,28 @@ import cyclone_energetics.constants as constants
 
 _LOG = logging.getLogger(__name__)
 
+# ERA5 CDS variable names changed ~2022.  Old data uses the GRIB parameter
+# IDs (p85.162, p84.162, p83.162), while newer data uses the short names
+# (vigd, vimdf, vithed).  We check for both.
+_VINT_NAME_MAPS: list = [
+    {"vigd": "vigd_filtered", "vimdf": "vimdf_filtered", "vithed": "vithed_filtered"},
+    {"vigd": "p85.162_filtered", "vimdf": "p84.162_filtered", "vithed": "p83.162_filtered"},
+]
+
+
+def _resolve_vint_names(
+    *,
+    ds: netCDF4.Dataset,
+) -> dict:
+    """Return the correct variable-name mapping for a smoothed vint file."""
+    for mapping in _VINT_NAME_MAPS:
+        if all(v in ds.variables for v in mapping.values()):
+            return mapping
+    available = list(ds.variables.keys())
+    raise KeyError(
+        "Cannot find vint variables in file.  Available: %s" % available
+    )
+
 
 def poleward_integration(
     field: npt.NDArray[np.floating],
@@ -172,9 +194,10 @@ def integrate_fluxes_poleward(
                     / ("era5_vint_%d_%s_filtered.nc" % (year, month))
                 )
             ) as ds_vint:
-                vigd = np.array(ds_vint["vigd_filtered"][:max_day, ::-1, :])
-                vimdf = np.array(ds_vint["vimdf_filtered"][:max_day, ::-1, :])
-                vithed = np.array(ds_vint["vithed_filtered"][:max_day, ::-1, :])
+                vn = _resolve_vint_names(ds=ds_vint)
+                vigd = np.array(ds_vint[vn["vigd"]][:max_day, ::-1, :])
+                vimdf = np.array(ds_vint[vn["vimdf"]][:max_day, ::-1, :])
+                vithed = np.array(ds_vint[vn["vithed"]][:max_day, ::-1, :])
 
             # Use latitude from the TE file for all integrations, matching
             # the original code (make_TE_int_2025.py line: latitude = np.copy(lat))

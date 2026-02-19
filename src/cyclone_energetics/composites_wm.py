@@ -22,6 +22,7 @@ import numpy.typing as npt
 import scipy.interpolate
 
 import cyclone_energetics.constants as constants
+import cyclone_energetics.integration as integration
 
 _LOG = logging.getLogger(__name__)
 
@@ -259,13 +260,14 @@ def _build_single_wm_composite(
                 / ("era5_vint_%d_%s_filtered.nc" % (year, month_str))
             )
         ) as ds:
-            first = ds["p85.162_filtered"][
+            vn = integration._resolve_vint_names(ds=ds)
+            first = ds[vn["vigd"]][
                 day_of_month, a_fi:b_fi, c_i:d_i
             ]
-            second = ds["p84.162_filtered"][
+            second = ds[vn["vimdf"]][
                 day_of_month, a_fi:b_fi, c_i:d_i
             ]
-            third = ds["p83.162_filtered"][
+            third = ds[vn["vithed"]][
                 day_of_month, a_fi:b_fi, c_i:d_i
             ]
 
