@@ -1,3 +1,17 @@
+"""Compute the vertically integrated meridional MSE flux.
+
+Produces files ``TE_YYYY_MM.nc`` containing the vertically integrated
+product of meridional wind and moist static energy:
+
+    (1/g) ∫₀ᵖˢ  v · h · β²  dp
+
+where h = c_p T + g Z + L_v q is the moist static energy (including
+geopotential) and β is the below-ground weighting factor.
+
+The divergence / poleward integration is performed in a subsequent
+pipeline step (:mod:`cyclone_energetics.integration`).
+"""
+
 import logging
 import pathlib
 
@@ -178,19 +192,14 @@ def _process_single_month_te(
         )
         del ta, hus, zg
 
-        mse_time_mean = np.mean(mse, axis=0, keepdims=True)
-        mse_prime = mse - mse_time_mean
-        del mse
-
         with netCDF4.Dataset(str(v_path)) as ds_v:
             v = np.array(ds_v["v"][s].filled(fill_value=np.nan), dtype=np.float64)
 
-        v_time_mean = np.mean(v, axis=0, keepdims=True)
-        v_prime = v - v_time_mean
-        del v
-
-        te_flux = v_prime * mse_prime * beta * beta
-        del v_prime, mse_prime, beta
+        # Full v * MSE product (matching original make_TE_ERA5.py).
+        # NaN from .filled() below ground would poison trapz (0 * NaN = NaN
+        # in plain numpy); nan_to_num ensures beta=0 zeros dominate.
+        te_flux = np.nan_to_num(v * mse * beta * beta, nan=0.0)
+        del v, mse, beta
 
         sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
         dvmsedt[:, lat_start:lat_end, :] = (
@@ -199,8 +208,8 @@ def _process_single_month_te(
         del te_flux, pa3d
         _LOG.info("Vertical integration completed for block %s", lat_block)
 
-    te_divergence = _compute_divergence(field=dvmsedt, latitude=latitude_now)
-
+    # Save the pre-divergence vertically integrated v*MSE flux.
+    # The divergence / poleward integration is done in integration.py.
     out_path = output_directory / ("TE_%d_%s.nc" % (year, month))
     with netCDF4.Dataset(str(z_path)) as ds_z:
         with netCDF4.Dataset(str(out_path), "w", format="NETCDF4_CLASSIC") as ds_out:
@@ -223,9 +232,9 @@ def _process_single_month_te(
             te_var = ds_out.createVariable(
                 "TE", "f4", ("time", "latitude", "longitude")
             )
-            te_var.units = "W/m2"
+            te_var.units = "W"
             te_var.long_name = (
-                "vertically integrated transient eddy MSE flux divergence"
+                "vertically integrated meridional MSE flux (v * MSE)"
             )
-            te_var[:, :, :] = te_divergence
+            te_var[:, :, :] = dvmsedt
     _LOG.info("Saved TE file: %s", out_path)

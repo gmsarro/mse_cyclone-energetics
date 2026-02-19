@@ -122,7 +122,9 @@ def _process_single_month_zonal(
             u = np.array(ds_u["u"][s].filled(fill_value=np.nan), dtype=np.float64)
 
         # Vertically integrate u * MSE with beta^2 weighting
-        te_flux = u * mse * beta * beta
+        # NaN from .filled() below ground would poison trapz (0 * NaN = NaN
+        # in plain numpy); nan_to_num ensures beta=0 zeros dominate.
+        te_flux = np.nan_to_num(u * mse * beta * beta, nan=0.0)
         del u, mse, beta
 
         sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
