@@ -1,15 +1,18 @@
-"""Compute the vertically integrated meridional MSE flux.
+"""Compute the transient-eddy (TE) divergence.
 
-Produces files ``TE_YYYY_MM.nc`` containing the vertically integrated
-product of meridional wind and moist static energy:
+Produces files ``TE_YYYY_MM.nc`` containing the meridional divergence of
+the vertically integrated transient-eddy MSE flux:
 
-    (1/g) ∫₀ᵖˢ  v · h · β²  dp
+    ∇_y · (1/g) ∫₀ᵖˢ  v' · h' · β²  dp
 
-where h = c_p T + g Z + L_v q is the moist static energy (including
-geopotential) and β is the below-ground weighting factor.
+where v' = v − ⟨v⟩ and h' = h − ⟨h⟩ are anomalies from the monthly
+mean, h = c_p T + g Z + L_v q is the moist static energy, and β is the
+below-ground weighting factor.
 
-The divergence / poleward integration is performed in a subsequent
-pipeline step (:mod:`cyclone_energetics.integration`).
+The transient-eddy flux divergence captures the contribution of
+sub-monthly (synoptic-scale) variability to the poleward energy
+transport.  It is subsequently smoothed and poleward-integrated in
+downstream pipeline steps.
 """
 
 import logging
@@ -195,11 +198,19 @@ def _process_single_month_te(
         with netCDF4.Dataset(str(v_path)) as ds_v:
             v = np.array(ds_v["v"][s].filled(fill_value=np.nan), dtype=np.float64)
 
-        # Full v * MSE product (matching original make_TE_ERA5.py).
+        # Transient-eddy anomalies: subtract the monthly (time) mean at
+        # every grid point to isolate the sub-monthly variability, matching
+        # the original make_TE_ERA5_1.py.
+        mse_prime = mse - np.mean(mse, axis=0, keepdims=True)
+        v_prime = v - np.mean(v, axis=0, keepdims=True)
+        del mse, v
+
         # NaN from .filled() below ground would poison trapz (0 * NaN = NaN
         # in plain numpy); nan_to_num ensures beta=0 zeros dominate.
-        te_flux = np.nan_to_num(v * mse * beta * beta, nan=0.0)
-        del v, mse, beta
+        te_flux = np.nan_to_num(
+            v_prime * mse_prime * beta * beta, nan=0.0
+        )
+        del v_prime, mse_prime, beta
 
         sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
         dvmsedt[:, lat_start:lat_end, :] = (
@@ -208,8 +219,11 @@ def _process_single_month_te(
         del te_flux, pa3d
         _LOG.info("Vertical integration completed for block %s", lat_block)
 
-    # Save the pre-divergence vertically integrated v*MSE flux.
-    # The divergence / poleward integration is done in integration.py.
+    # Apply meridional divergence to the vertically integrated flux.
+    te_divergence = _compute_divergence(
+        field=dvmsedt, latitude=latitude_now
+    )
+
     out_path = output_directory / ("TE_%d_%s.nc" % (year, month))
     with netCDF4.Dataset(str(z_path)) as ds_z:
         with netCDF4.Dataset(str(out_path), "w", format="NETCDF4_CLASSIC") as ds_out:
@@ -232,9 +246,9 @@ def _process_single_month_te(
             te_var = ds_out.createVariable(
                 "TE", "f4", ("time", "latitude", "longitude")
             )
-            te_var.units = "W"
+            te_var.units = "W m-2"
             te_var.long_name = (
-                "vertically integrated meridional MSE flux (v * MSE)"
+                "divergence of vertically integrated transient-eddy MSE flux"
             )
-            te_var[:, :, :] = dvmsedt
+            te_var[:, :, :] = te_divergence
     _LOG.info("Saved TE file: %s", out_path)

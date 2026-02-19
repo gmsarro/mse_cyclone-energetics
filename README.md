@@ -199,6 +199,9 @@ to point to the directory containing the pipeline output.
   beta mask that smoothly transitions to zero for levels below the
   surface.  Level 36 on the ERA5 37-level grid is always recalculated to
   match the reference implementation.
+* **Transient-eddy anomalies** — The TE term uses anomalies from the
+  monthly mean (v' = v − ⟨v⟩, h' = h − ⟨h⟩) to isolate the sub-monthly
+  variability.  Storage (dh/dt) and zonal MSE advection use full fields.
 * **Vectorised integration** — Poleward integration operates on full
   `(time, lat, lon)` arrays in a single pass (no Python loops over
   timesteps or longitudes).
