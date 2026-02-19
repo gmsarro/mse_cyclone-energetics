@@ -35,7 +35,7 @@ cyclone_energetics/
     ├── flux_computation.py     # Step 1a  — transient-eddy flux divergence
     ├── storage_computation.py  # Step 1b  — MSE storage term (dh/dt)
     ├── zonal_advection.py      # Step 1c  — zonal MSE advection divergence
-    ├── smoothing.py            # Step 2   — CDO regridding & NCL Hoskins spectral filter
+    ├── smoothing.py            # Step 2   — Hoskins spectral filter (NCL-driven)
     ├── track_processing.py     # Step 3   — TRACK algorithm post-processing
     ├── masking.py              # Step 4   — cyclone/anticyclone masks
     ├── integration.py          # Step 5   — poleward flux integration
@@ -55,9 +55,8 @@ cd mse_cyclone-energetics
 pip install -e ".[dev]"
 ```
 
-Requires **Python ≥ 3.10**, [CDO](https://code.mpimet.mpg.de/projects/cdo)
-(for regridding), and [NCL](https://www.ncl.ucar.edu/) (for the Hoskins
-spectral filter).
+Requires **Python ≥ 3.10** and [NCL](https://www.ncl.ucar.edu/) (for the
+Hoskins spectral filter).
 
 ---
 
@@ -87,15 +86,16 @@ documented via `--help`.
  │   ERA5 data  │
  └──────┬───────┘
         │
-        ├─── Step 1a: compute-te ──────────► TE divergence files
+        ├─── Step 1a: compute-te ──────────► TE divergence (not smoothed)
         ├─── Step 1b: compute-dhdt ────────► dh/dt files
         ├─── Step 1c: compute-zonal-mse ──► Zonal MSE advection files
         │
         ▼
- ┌─────────────────────────────────────────────────┐
- │  Step 2a: smooth-cdo (CDO remapbil)             │──► Regridded fields
- │  Step 2b: smooth-hoskins (Hoskins spectral)     │──► Spectrally filtered TE/vint/dh/dt
- └──────┬──────────────────────────────────────────┘
+ ┌──────────────────────────────────────────────────────┐
+ │  Step 2: smooth-hoskins (Hoskins spectral filter)    │
+ │  → filters dh/dt and ERA5 vint fields only           │
+ │  → TE is NOT smoothed (already smooth from anomaly)  │
+ └──────┬───────────────────────────────────────────────┘
         │
         │  TRACK output
         │       │
@@ -108,6 +108,8 @@ documented via `--help`.
         ▼       ▼
  ┌─────────────────────────────────┐
  │  Step 5: integrate-fluxes       │──► Poleward-integrated flux NetCDFs
+ │  (raw TE + smoothed dh/dt       │    (in PW)
+ │   + smoothed vint + radiation)  │
  └──────┬──────────────────────────┘
         │
         ▼
@@ -205,12 +207,14 @@ to point to the directory containing the pipeline output.
 * **Vectorised integration** — Poleward integration operates on full
   `(time, lat, lon)` arrays in a single pass (no Python loops over
   timesteps or longitudes).
-* **Two-stage smoothing** — Raw ERA5 fields are regridded with CDO
-  (`cdo remapbil`); derived fields (TE, vint, dh/dt) are spectrally
-  smoothed with a Hoskins filter (n₀ = 60, r = 1, truncation T100)
-  using NCL's built-in spherical-harmonic routines (`shaeC` / `shseC`).
-  Python drives the NCL script (`ncl/hoskins_filter.ncl`) by passing
-  all parameters via environment variables.
+* **Hoskins spectral filter** — The ERA5 vertically-integrated energy
+  terms (vint) and the storage term (dh/dt) are spectrally smoothed with
+  a Hoskins filter (n₀ = 60, r = 1, truncation T100) using NCL's
+  built-in spherical-harmonic routines (`shaeC` / `shseC`).  Python
+  drives the NCL script (`ncl/hoskins_filter.ncl`) by passing all
+  parameters via environment variables.  The transient-eddy (TE)
+  divergence is **not** smoothed because the monthly anomaly product is
+  already sufficiently smooth.
 * **Complete energy budget** — The pipeline computes every term of the
   cyclone-centred MSE energy budget: transient eddy (TE), surface heat
   flux (SHF), radiation (Swabs, OLR), MSE storage (dh/dt), and zonal

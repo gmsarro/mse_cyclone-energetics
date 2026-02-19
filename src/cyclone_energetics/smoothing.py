@@ -1,32 +1,25 @@
 from __future__ import annotations
 
-"""Smooth / filter ERA5 fields using CDO and NCL.
+"""Hoskins spectral filter for ERA5 derived fields.
 
-Two smoothing strategies are provided:
+Drives the NCL script ``ncl/hoskins_filter.ncl`` which reproduces the
+original NCL-based Hoskins filter used in the analysis pipeline
+(``smooth_vint.ncl``, ``smooth_dh_dt_ERA5.ncl``).
 
-1. **CDO bilinear regridding** (``smooth_era5_fields``)
-   Uses ``cdo remapbil`` for fast regridding of raw ERA5 fields to a
-   coarser grid (default ``r360x180``).
+The field is decomposed into spherical harmonics (``shaeC``), the
+spectral coefficients are truncated and multiplied by the Hoskins
+damping coefficient
 
-2. **NCL Hoskins spectral filter** (``hoskins_spectral_smooth``)
-   Drives the NCL script ``ncl/hoskins_filter.ncl`` which reproduces the
-   original NCL-based Hoskins filter used in the analysis pipeline
-   (``smooth_vint.ncl``, ``smooth_dh_dt_ERA5.ncl``, ``smooth_VM_ERA5.ncl``).
+    w(n) = exp[ −(n(n+1) / n₀(n₀+1))^r ]
 
-   The field is decomposed into spherical harmonics (``shaeC``), the
-   spectral coefficients are truncated and multiplied by the Hoskins
-   damping coefficient
+with n₀ = 60 and r = 1, then synthesised back to grid space
+(``shseC``).  NCL's built-in spherical-harmonic routines are extremely
+efficient and well-tested.
 
-       w(n) = exp[ −(n(n+1) / n₀(n₀+1))^r ]
-
-   with n₀ = 60 and r = 1, then synthesised back to grid space
-   (``shseC``).  NCL's built-in spherical-harmonic routines are
-   extremely efficient and well-tested.
-
-CDO performs bilinear interpolation on the native grid with high
-throughput and minimal memory overhead.  The Hoskins spectral filter is
-applied to derived fields (TE, vint, dh/dt) that must be smoothed in
-spectral space before meridional integration.
+Only the ERA5 vertically-integrated energy terms (vint: ``vigd``,
+``vimdf``, ``vithed``) and the storage term (dh/dt) are smoothed.
+The transient-eddy (TE) divergence is **not** smoothed because the
+monthly anomaly product is already sufficiently smooth.
 """
 
 import logging
@@ -44,72 +37,6 @@ _NCL_SCRIPT: pathlib.Path = (
 )
 
 
-# ---------------------------------------------------------------------------
-# 1. CDO bilinear regridding
-# ---------------------------------------------------------------------------
-def smooth_era5_fields(
-    *,
-    year_start: int,
-    year_end: int,
-    variables: list,
-    input_directory: pathlib.Path,
-    output_directory: pathlib.Path,
-    target_grid: str = "r360x180",
-) -> None:
-    """Regrid raw ERA5 fields with CDO ``remapbil``.
-
-    For each ``(variable, year, month)`` combination the file
-    ``era5_{var}_{year}_{month}.6hrly.nc`` is interpolated onto
-    *target_grid* and written to *output_directory*.
-    """
-    output_directory.mkdir(parents=True, exist_ok=True)
-    for variable in variables:
-        for year in range(year_start, year_end):
-            for month in constants.MONTH_STRINGS:
-                _LOG.info(
-                    "CDO regrid: variable=%s year=%s month=%s",
-                    variable,
-                    year,
-                    month,
-                )
-                infile = (
-                    input_directory
-                    / variable
-                    / ("era5_%s_%d_%s.6hrly.nc" % (variable, year, month))
-                )
-                outfile = (
-                    output_directory
-                    / variable
-                    / (
-                        "smoothed_era5_%s_%d_%s.6hrly.nc"
-                        % (variable, year, month)
-                    )
-                )
-                outfile.parent.mkdir(parents=True, exist_ok=True)
-                cmd = [
-                    "cdo",
-                    "remapbil,%s" % target_grid,
-                    str(infile),
-                    str(outfile),
-                ]
-                _LOG.info("Running: %s", " ".join(cmd))
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, check=False
-                )
-                if result.returncode != 0:
-                    _LOG.error(
-                        "CDO smoothing failed for %s: %s",
-                        infile,
-                        result.stderr,
-                    )
-                    raise RuntimeError(
-                        "CDO smoothing failed for %s" % infile
-                    )
-
-
-# ---------------------------------------------------------------------------
-# 2. NCL Hoskins spectral filter
-# ---------------------------------------------------------------------------
 def hoskins_spectral_smooth(
     *,
     input_path: pathlib.Path,
@@ -130,7 +57,7 @@ def hoskins_spectral_smooth(
     output_path : pathlib.Path
         Destination for the filtered NetCDF file.
     variable_names : list[str]
-        Variables to filter (e.g. ``["TE"]`` or ``["vigd", "vimdf", "vithed"]``).
+        Variables to filter (e.g. ``["tend"]`` or ``["vigd", "vimdf", "vithed"]``).
     output_variable_names : list[str] or None
         Output variable names.  If *None*, each input name gets a
         ``_filtered`` suffix.
@@ -201,42 +128,32 @@ def smooth_all_pipeline_fields(
     *,
     year_start: int,
     year_end: int,
-    te_directory: pathlib.Path,
     dhdt_directory: pathlib.Path,
     vint_directory: pathlib.Path,
-    output_te_directory: pathlib.Path,
     output_dhdt_directory: pathlib.Path,
     output_vint_directory: pathlib.Path,
     ntrunc: int = constants.HOSKINS_NTRUNC,
 ) -> None:
     """Apply the Hoskins spectral filter to all pipeline fields.
 
-    This replaces the NCL scripts ``smooth_vint.ncl``,
-    ``smooth_dh_dt_ERA5.ncl``, and ``smooth_VM_ERA5.ncl``.
+    This replaces the NCL scripts ``smooth_vint.ncl`` and
+    ``smooth_dh_dt_ERA5.ncl``.
 
-    Smoothed files are written with a ``_filtered`` suffix in the output
-    directories.
+    The transient-eddy (TE) divergence is **not** smoothed; it is
+    already sufficiently smooth from the monthly anomaly computation.
+
+    Only dh/dt and the ERA5 vertically-integrated energy terms (vint)
+    are filtered.  Smoothed files are written with a ``_filtered``
+    suffix in the output directories.
     """
-    output_te_directory.mkdir(parents=True, exist_ok=True)
     output_dhdt_directory.mkdir(parents=True, exist_ok=True)
     output_vint_directory.mkdir(parents=True, exist_ok=True)
 
     for year in range(year_start, year_end):
         for month in constants.MONTH_STRINGS:
-            # TE files
-            te_in = te_directory / ("TE_%d_%s.nc" % (year, month))
-            te_out = output_te_directory / ("TE_%d_%s_filtered.nc" % (year, month))
-            if te_in.exists():
-                hoskins_spectral_smooth(
-                    input_path=te_in,
-                    output_path=te_out,
-                    variable_names=["TE"],
-                    ntrunc=ntrunc,
-                )
-
             # dh/dt files
-            dhdt_in = dhdt_directory / ("tend_%d_%s_2.nc" % (year, month))
-            dhdt_out = output_dhdt_directory / ("tend_%d_%s_filtered.nc" % (year, month))
+            dhdt_in = dhdt_directory / ("tend_%d_%s.nc" % (year, month))
+            dhdt_out = output_dhdt_directory / ("tend_%d_%s_filtered_2.nc" % (year, month))
             if dhdt_in.exists():
                 hoskins_spectral_smooth(
                     input_path=dhdt_in,

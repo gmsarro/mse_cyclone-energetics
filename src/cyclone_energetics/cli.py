@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import typing
 
 import numpy as np
 import typer
@@ -122,60 +121,15 @@ def compute_zonal_mse(
 
 
 # -----------------------------------------------------------------------
-# Step 2a — CDO regridding
-# -----------------------------------------------------------------------
-@app.command()
-def smooth_cdo(
-    input_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Input directory with ERA5 fields")
-    ],
-    output_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Output directory for smoothed files")
-    ],
-    variables: typing_extensions.Annotated[
-        typing.Optional[str], typer.Option(help="Comma-separated variable names")
-    ] = "TE",
-    year_start: typing_extensions.Annotated[
-        int, typer.Option(help="Start year (inclusive)")
-    ] = 2000,
-    year_end: typing_extensions.Annotated[
-        int, typer.Option(help="End year (exclusive)")
-    ] = 2023,
-    target_grid: typing_extensions.Annotated[
-        str, typer.Option(help="CDO target grid specification")
-    ] = "r360x180",
-) -> None:
-    """Step 2a: Regrid ERA5 fields using CDO bilinear interpolation."""
-    _setup_logging()
-    var_list = [v.strip() for v in (variables or "TE").split(",")]
-    print("CDO regridding: %s" % var_list)
-    smoothing.smooth_era5_fields(
-        year_start=year_start,
-        year_end=year_end,
-        variables=var_list,
-        input_directory=input_directory,
-        output_directory=output_directory,
-        target_grid=target_grid,
-    )
-    print("Done.")
-
-
-# -----------------------------------------------------------------------
-# Step 2b — Hoskins spectral filter (drives NCL)
+# Step 2 — Hoskins spectral filter (drives NCL)
 # -----------------------------------------------------------------------
 @app.command()
 def smooth_hoskins(
-    te_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with raw TE files")
-    ],
     dhdt_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Directory with raw dh/dt files")
     ],
     vint_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with raw vint files")
-    ],
-    output_te_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Output directory for filtered TE files")
+        pathlib.Path, typer.Option(help="Directory with raw ERA5 vint files")
     ],
     output_dhdt_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for filtered dh/dt files")
@@ -193,16 +147,20 @@ def smooth_hoskins(
         int, typer.Option(help="Maximum total wavenumber for Hoskins filter")
     ] = constants.HOSKINS_NTRUNC,
 ) -> None:
-    """Step 2b: Apply the Hoskins spectral filter (NCL) to TE, dh/dt, and vint."""
+    """Step 2: Apply the Hoskins spectral filter to dh/dt and vint fields.
+
+    The transient-eddy (TE) divergence is NOT smoothed; the monthly
+    anomaly product is already sufficiently smooth.  Only dh/dt and the
+    ERA5 vertically-integrated energy terms (vigd, vimdf, vithed) are
+    filtered before meridional integration.
+    """
     _setup_logging()
-    print("Applying Hoskins spectral filter")
+    print("Applying Hoskins spectral filter to dh/dt and vint fields")
     smoothing.smooth_all_pipeline_fields(
         year_start=year_start,
         year_end=year_end,
-        te_directory=te_directory,
         dhdt_directory=dhdt_directory,
         vint_directory=vint_directory,
-        output_te_directory=output_te_directory,
         output_dhdt_directory=output_dhdt_directory,
         output_vint_directory=output_vint_directory,
         ntrunc=ntrunc,
@@ -280,13 +238,13 @@ def create_masks(
 @app.command()
 def integrate_fluxes(
     te_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with TE flux files")
+        pathlib.Path, typer.Option(help="Directory with raw TE divergence files (not smoothed)")
     ],
     dhdt_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with smoothed dh/dt files")
+        pathlib.Path, typer.Option(help="Directory with Hoskins-filtered dh/dt files")
     ],
     vint_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with smoothed vertically integrated fields")
+        pathlib.Path, typer.Option(help="Directory with Hoskins-filtered vint fields")
     ],
     radiation_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Directory with radiation data")
