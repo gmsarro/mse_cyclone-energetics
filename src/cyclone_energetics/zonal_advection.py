@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Compute the vertically integrated zonal MSE advection divergence.
 
 The zonal MSE advection is the zonal divergence of the vertically

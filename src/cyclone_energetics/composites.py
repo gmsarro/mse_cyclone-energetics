@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Cyclone-centred monthly composites on a storm-relative 0.25° grid.
 
 Based on the ``create_composites_AI.py`` / ``create_composites_intense_AI.py``

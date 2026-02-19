@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Process cyclone and anticyclone tracks from the TRACK algorithm.
 
 The TRACK algorithm identifies and follows vorticity features on the

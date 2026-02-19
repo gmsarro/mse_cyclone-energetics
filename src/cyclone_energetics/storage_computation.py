@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Compute the vertically integrated MSE storage term (dh/dt).
 
 The storage term is the time tendency of the vertically integrated moist

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Build cyclone-centred composites of *local* (W m⁻²) energy-budget terms.
 
 This module creates the "W_M" composite files used for the cyclone-centred

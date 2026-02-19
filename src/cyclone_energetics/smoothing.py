@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Smooth / filter ERA5 fields using CDO and NCL.
 
 Two smoothing strategies are provided:

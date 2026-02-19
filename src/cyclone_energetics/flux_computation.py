@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Compute the transient-eddy (TE) divergence.
 
 Produces files ``TE_YYYY_MM.nc`` containing the meridional divergence of
