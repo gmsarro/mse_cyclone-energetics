@@ -54,3 +54,4 @@ nb_fig_fix_*.out
 # Local execution helpers (not for public repo)
 notebooks/run_figures_execute_only.py
 notebooks/run_final_figures.sbatch
+notebooks/plot_fig7_composites.py
