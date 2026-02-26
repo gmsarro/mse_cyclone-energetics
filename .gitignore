@@ -50,3 +50,7 @@ notebooks/*.png
 notebooks/*.pdf
 *.sbatch
 nb_fig_fix_*.out
+
+# Local execution helpers (not for public repo)
+notebooks/run_figures_execute_only.py
+notebooks/run_final_figures.sbatch
