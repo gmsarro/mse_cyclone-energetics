@@ -15,4 +15,7 @@ source activate notebook_env 2>/dev/null || conda activate notebook_env
 # Fix outputs then execute notebook (no save = no validation failure)
 python3 run_figures_execute_only.py
 
+# Figure 7 composites (NH and SH)
+python3 plot_fig7_composites.py
+
 echo "Notebook execution finished. Check outputs above."
