@@ -26,10 +26,11 @@ def _load_track_npz(
     track_directory: pathlib.Path,
     track_type: str,
     hemisphere: str,
+    track_filename_pattern: str = "{track_type}_VO_anom_T42_ERA5_{hemisphere}_long.npz",
 ) -> dict[str, npt.NDArray]:
-    fname = "%s_VO_anom_T42_ERA5_1979_2018_all%s_long.npz" % (
-        track_type,
-        hemisphere,
+    fname = track_filename_pattern.format(
+        track_type=track_type,
+        hemisphere=hemisphere,
     )
     npz = np.load(str(track_directory / fname), allow_pickle=True)
     return dict(npz)
@@ -238,6 +239,7 @@ def create_cyclone_masks(
     track_directory: pathlib.Path,
     output_directory: pathlib.Path,
     vorticity_threshold: float = constants.VORTICITY_THRESHOLD,
+    track_filename_pattern: str = "{track_type}_VO_anom_T42_ERA5_{hemisphere}_long.npz",
 ) -> None:
     output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -249,11 +251,13 @@ def create_cyclone_masks(
         track_directory=track_directory,
         track_type="TRACK",
         hemisphere=hemisphere,
+        track_filename_pattern=track_filename_pattern,
     )
     anticyclone_data = _load_track_npz(
         track_directory=track_directory,
         track_type="ANTIC",
         hemisphere=hemisphere,
+        track_filename_pattern=track_filename_pattern,
     )
 
     (

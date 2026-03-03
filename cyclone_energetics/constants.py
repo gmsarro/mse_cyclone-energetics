@@ -6,6 +6,7 @@ import numpy as np
 
 EARTH_RADIUS: float = 6.371e6
 GRAVITY: float = 9.81
+ERA5_BASE_YEAR: int = 1979
 CPD: float = 1005.7
 RD: float = 287.0
 RV: float = 461.0

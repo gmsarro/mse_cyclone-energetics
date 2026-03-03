@@ -81,7 +81,7 @@ def _compute_time_indices(
     npt.NDArray[np.integer],
 ]:
     total_points = len(time_array)
-    long_year = (time_array // constants.TIMESTEPS_PER_YEAR) + 1979
+    long_year = (time_array // constants.TIMESTEPS_PER_YEAR) + constants.ERA5_BASE_YEAR
     long_diy = time_array % constants.TIMESTEPS_PER_YEAR
     long_mon = np.zeros(total_points, dtype="int32")
     for m in range(12):
@@ -156,7 +156,16 @@ def process_track_data(
     output_directory: pathlib.Path,
     hemispheres: list[str] | None = None,
     track_types: list[str] | None = None,
+    track_filename_pattern: str = "{track_type}_VO_anom_T42_ERA5_{hemisphere}.nc",
 ) -> None:
+    """Process raw TRACK algorithm output into .npz arrays.
+
+    Parameters
+    ----------
+    track_filename_pattern : str
+        Filename pattern with {track_type} and {hemisphere} placeholders.
+        Default: "{track_type}_VO_anom_T42_ERA5_{hemisphere}.nc"
+    """
     if hemispheres is None:
         hemispheres = ["SH", "NH"]
     if track_types is None:
@@ -167,9 +176,9 @@ def process_track_data(
     for hemisphere in hemispheres:
         for track_type in track_types:
             _LOG.info("Processing tracks: %s %s", track_type, hemisphere)
-            filename = "%s_VO_anom_T42_ERA5_1979_2024_%s.nc" % (
-                track_type,
-                hemisphere,
+            filename = track_filename_pattern.format(
+                track_type=track_type,
+                hemisphere=hemisphere,
             )
             input_path = track_directory / filename
             output_name = filename.replace(".nc", "_long.npz")

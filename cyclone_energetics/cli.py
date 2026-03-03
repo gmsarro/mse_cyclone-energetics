@@ -168,6 +168,9 @@ def process_tracks(
     output_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for processed .npz files")
     ],
+    track_filename_pattern: typing_extensions.Annotated[
+        str, typer.Option(help="Filename pattern with {track_type} and {hemisphere} placeholders")
+    ] = "{track_type}_VO_anom_T42_ERA5_{hemisphere}.nc",
 ) -> None:
     """Step 3: Process raw TRACK algorithm output into .npz arrays."""
     _setup_logging()
@@ -175,6 +178,7 @@ def process_tracks(
     track_processing.process_track_data(
         track_directory=track_directory,
         output_directory=output_directory,
+        track_filename_pattern=track_filename_pattern,
     )
     print("Done.")
 
@@ -202,6 +206,9 @@ def create_masks(
     vorticity_threshold: typing_extensions.Annotated[
         float, typer.Option(help="Vorticity threshold in CVU")
     ] = 0.225,
+    track_filename_pattern: typing_extensions.Annotated[
+        str, typer.Option(help="Track .npz filename pattern with {track_type} and {hemisphere}")
+    ] = "{track_type}_VO_anom_T42_ERA5_{hemisphere}_long.npz",
 ) -> None:
     """Step 4: Build cyclone/anticyclone masks from vorticity contours."""
     _setup_logging()
@@ -214,6 +221,7 @@ def create_masks(
         track_directory=track_directory,
         output_directory=output_directory,
         vorticity_threshold=vorticity_threshold,
+        track_filename_pattern=track_filename_pattern,
     )
     print("Done.")
 

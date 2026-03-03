@@ -482,7 +482,7 @@ def build_cyclone_composites(
         lon_trk = _to_360(np.array(ds["longitude"][:]).astype(np.float32))
         inten_trk = np.array(ds["intensity"][:]).astype(np.float32)
 
-    year_from_idx = (1979 + time_index // _STEPS_PER_YEAR).astype(np.int16)
+    year_from_idx = (constants.ERA5_BASE_YEAR + time_index // _STEPS_PER_YEAR).astype(np.int16)
     mask = (
         (year_from_idx >= year_start) & (year_from_idx < year_end)
         & (inten_trk >= intensity_min) & (inten_trk <= intensity_max)
@@ -499,7 +499,7 @@ def build_cyclone_composites(
         return
     _LOG.info("  %d track snapshots after year/intensity filter", n_storms)
 
-    year_arr = (1979 + step_arr // _STEPS_PER_YEAR).astype(np.int16)
+    year_arr = (constants.ERA5_BASE_YEAR + step_arr // _STEPS_PER_YEAR).astype(np.int16)
     doy_arr = (step_arr % _STEPS_PER_YEAR) // 4
     hour6_arr = (step_arr % 4).astype(np.int8)
     mcum = constants.NOLEAP_MONTH_CUMULATIVE
