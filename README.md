@@ -1,273 +1,239 @@
-# A Localized Moist Static Energy Budget for Cyclone Seasonality
+# Cyclone Energetics
 
-> **What Controls the Seasonality of Intense Cyclones?**
-> Giorgio M. Sarro, Pragallva Barpanda, Tiffany A. Shaw
-> *Manuscript submitted to Geophysical Research Letters*
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Typed](https://img.shields.io/badge/typed-mypy-blue.svg)](http://mypy-lang.org/)
 
-We derive a **new localized Moist Static Energy (MSE) budget** to
-quantify what drives the seasonality of intense cyclones.  This
-repository contains the complete analysis pipeline — from raw ERA5
-reanalysis to final publication figures.  Starting from 6-hourly ERA5
-fields and TRACK algorithm output, the code computes every term of the
-budget (transient-eddy flux divergence, surface heat fluxes, radiation,
-MSE storage, zonal MSE advection), applies cyclone masks, performs
-poleward integrations, bins by cyclone intensity, builds cyclone-centred
-composites, and generates all seven figures presented in the paper.
-
----
-
-## Repository layout
-
-```
-cyclone_energetics/
-├── pyproject.toml              # Package metadata and dependencies
-├── README.md
-├── LICENSE
-├── ncl/
-│   └── hoskins_filter.ncl     # NCL Hoskins spectral filter (driven by smoothing.py)
-├── notebooks/
-│   └── final_figures.ipynb     # Notebook that generates every paper figure
-└── src/cyclone_energetics/
-    ├── __init__.py
-    ├── cli.py                  # Typer CLI (one command per pipeline step)
-    ├── constants.py            # Physical constants
-    ├── geometry.py             # Spherical-coordinate transforms
-    ├── flux_computation.py     # Step 1a  — transient-eddy flux divergence
-    ├── storage_computation.py  # Step 1b  — MSE storage term (dh/dt)
-    ├── zonal_advection.py      # Step 1c  — zonal MSE advection divergence
-    ├── smoothing.py            # Step 2   — Hoskins spectral filter (NCL-driven)
-    ├── track_processing.py     # Step 3   — TRACK algorithm post-processing
-    ├── masking.py              # Step 4   — cyclone/anticyclone masks
-    ├── integration.py          # Step 5   — poleward flux integration
-    ├── flux_assignment.py      # Step 6   — assign fluxes by intensity bin
-    ├── composites.py           # Step 7a  — cyclone-centred composites (integrated fluxes)
-    ├── composites_wm.py        # Step 7b  — cyclone-centred composites (W/m² budget terms)
-    └── condensed_composites.py # Step 8   — condensed monthly composites
-```
-
----
+Compute a **localized Moist Static Energy (MSE) budget** for cyclone seasonality analysis. Associated with the methods described in Sarro, Barpanda & Shaw (2025).
 
 ## Installation
 
 ```bash
-git clone https://github.com/gmsarro/mse_cyclone-energetics.git
-cd mse_cyclone-energetics
-pip install -e ".[dev]"
+pip install git+https://github.com/gmsarro/mse_cyclone-energetics.git
 ```
 
-Requires **Python ≥ 3.10** and [NCL](https://www.ncl.ucar.edu/) (for the
-Hoskins spectral filter).
+Or from a local clone:
 
----
+```bash
+git clone https://github.com/gmsarro/mse_cyclone-energetics.git
+cd mse_cyclone-energetics
+pip install -e .
+```
 
-## Data requirements
+### What you get
 
-The pipeline requires:
+One importable Python package and one CLI with multiple commands:
+
+| Package | Import | CLI Commands |
+|---------|--------|--------------|
+| **cyclone_energetics** | `import cyclone_energetics` | `cyclone-energetics compute-te`, `compute-dhdt`, `compute-zonal-mse`, `smooth-hoskins`, `process-tracks`, `create-masks`, `integrate-fluxes`, `assign-fluxes`, `build-composites`, `condense-composites` |
+
+## Quick Start
+
+The pipeline processes ERA5 reanalysis and TRACK algorithm output to compute the complete MSE budget for cyclones.
+
+### Step 1: Compute budget terms
+
+```bash
+# Transient-eddy flux divergence
+cyclone-energetics compute-te \
+    --era5-base-directory /path/to/ERA5 \
+    --output-directory /path/to/output/TE \
+    --year-start 2000 --year-end 2020
+
+# MSE storage term (dh/dt)
+cyclone-energetics compute-dhdt \
+    --era5-base-directory /path/to/ERA5 \
+    --output-directory /path/to/output/dhdt \
+    --year-start 2000 --year-end 2020
+
+# Zonal MSE advection
+cyclone-energetics compute-zonal-mse \
+    --era5-base-directory /path/to/ERA5 \
+    --output-directory /path/to/output/adv_mse \
+    --year-start 2000 --year-end 2020
+```
+
+### Step 2: Apply Hoskins spectral filter
+
+```bash
+cyclone-energetics smooth-hoskins \
+    --dhdt-directory /path/to/output/dhdt \
+    --vint-directory /path/to/ERA5/vint \
+    --adv-mse-directory /path/to/output/adv_mse \
+    --output-dhdt-directory /path/to/output/smoothed_dhdt \
+    --output-vint-directory /path/to/output/smoothed_vint \
+    --output-adv-mse-directory /path/to/output/smoothed_adv_mse \
+    --year-start 2000 --year-end 2020
+```
+
+### Step 3: Process TRACK output and create masks
+
+```bash
+cyclone-energetics process-tracks \
+    --track-directory /path/to/TRACK \
+    --output-directory /path/to/output/tracks
+
+cyclone-energetics create-masks \
+    --track-directory /path/to/output/tracks \
+    --output-directory /path/to/output/masks \
+    --year-start 2000 --year-end 2020
+```
+
+### Step 4: Integrate fluxes poleward
+
+```bash
+cyclone-energetics integrate-fluxes \
+    --te-directory /path/to/output/TE \
+    --dhdt-directory /path/to/output/smoothed_dhdt \
+    --vint-directory /path/to/output/smoothed_vint \
+    --radiation-directory /path/to/ERA5/rad \
+    --adv-mse-directory /path/to/output/smoothed_adv_mse \
+    --output-directory /path/to/output/integrated \
+    --year-start 2000 --year-end 2020
+```
+
+### Step 5: Assign fluxes by intensity and build composites
+
+```bash
+cyclone-energetics assign-fluxes \
+    --integrated-flux-directory /path/to/output/integrated \
+    --mask-directory /path/to/output/masks \
+    --track-directory /path/to/output/tracks \
+    --output-directory /path/to/output/assigned
+
+cyclone-energetics build-composites \
+    --track-path /path/to/output/tracks/TRACK_NH.nc \
+    --integrated-flux-directory /path/to/output/assigned \
+    --output-directory /path/to/output/composites \
+    --hemisphere NH --year-start 2000 --year-end 2020
+```
+
+Full help for any command:
+
+```bash
+cyclone-energetics --help
+cyclone-energetics compute-te --help
+```
+
+## Python API
+
+The package exposes functions for direct use in scripts and notebooks:
+
+```python
+import cyclone_energetics.flux_computation
+import cyclone_energetics.integration
+import cyclone_energetics.composites
+
+# Compute transient-eddy flux for a specific year range
+cyclone_energetics.flux_computation.compute_transient_eddy_flux(
+    year_start=2015,
+    year_end=2016,
+    era5_base_directory=pathlib.Path("/path/to/ERA5"),
+    output_directory=pathlib.Path("/path/to/output"),
+)
+
+# Build cyclone-centred composites
+cyclone_energetics.composites.build_cyclone_composites(
+    year_start=2000,
+    year_end=2020,
+    hemisphere="SH",
+    intensity_min=6,
+    intensity_max=99,
+    track_path=pathlib.Path("/path/to/tracks.nc"),
+    # ... additional parameters
+)
+```
+
+## Configurable Parameters
+
+All physical and numerical parameters are exposed as CLI options:
+
+| Parameter | Flag | Default | Description |
+|-----------|------|---------|-------------|
+| Year range | `--year-start`, `--year-end` | *required* | Processing period |
+| Hemisphere | `--hemisphere` | *required* | `NH` or `SH` |
+| Intensity range | `--intensity-min`, `--intensity-max` | 1, 99 | CVU intensity filter |
+| Area cut | `--area-cut` | 0.225 | Storm-track area threshold |
+| Hoskins filter n₀ | `--n0` | 60 | Spectral filter cutoff |
+
+## Repository Structure
+
+```
+mse_cyclone-energetics/
+├── pyproject.toml           # Package configuration (pip install .)
+├── cyclone_energetics/      # Main package
+│   ├── __init__.py
+│   ├── cli.py               #   Typer CLI entry point
+│   ├── constants.py         #   Physical constants
+│   ├── geometry.py          #   Spherical coordinate utilities
+│   ├── flux_computation.py  #   Transient-eddy flux divergence
+│   ├── storage_computation.py  # MSE storage term (dh/dt)
+│   ├── zonal_advection.py   #   Zonal MSE advection
+│   ├── smoothing.py         #   Hoskins spectral filter (NCL-driven)
+│   ├── track_processing.py  #   TRACK algorithm post-processing
+│   ├── masking.py           #   Cyclone/anticyclone masks
+│   ├── integration.py       #   Poleward flux integration
+│   ├── flux_assignment.py   #   Intensity-binned flux assignment
+│   ├── composites.py        #   Cyclone-centred composites
+│   └── condensed_composites.py  # Monthly condensed output
+├── ncl/
+│   └── hoskins_filter.ncl   # NCL Hoskins spectral filter script
+├── notebooks/
+│   └── final_figures.ipynb  # Reproduce all paper figures
+├── README.md
+├── LICENSE
+└── .gitignore
+```
+
+## Requirements
+
+### Python
+
+- Python >= 3.10
+- Dependencies are installed automatically via `pip install .`
+
+### External
+
+- [NCL](https://www.ncl.ucar.edu/) (for Hoskins spectral filter only)
+
+### Data
 
 | Dataset | Description |
 |---------|-------------|
-| **ERA5 6-hourly fields** | `t`, `q`, `ps`, `z`, `v`, `u`, `tsr`, `ssr`, `ttr`, `vint` (vertically integrated fluxes), `t2m` — one NetCDF per month |
-| **TRACK output** | Cyclone and anticyclone track files (`TRACK_VO_anom_T42_ERA5_*.nc`, `ANTIC_VO_anom_T42_ERA5_*.nc`) |
-| **Filtered vorticity** | T42 vorticity fields produced by the TRACK algorithm (`VO.anom.T42.*.nc`) |
+| **ERA5 6-hourly** | `t`, `q`, `ps`, `z`, `v`, `u`, `tsr`, `ssr`, `ttr`, `vint`, `t2m` |
+| **TRACK output** | Cyclone/anticyclone tracks and T42 filtered vorticity |
 
-Filenames follow the ERA5 convention used by ECMWF/CDS:
-`era5_{variable}_{year}_{month}.6hrly.nc`.
+## Generating Paper Figures
 
----
-
-## Processing workflow
-
-The pipeline must be run **in order**.  Each step has a corresponding CLI
-command (`cyclone-energetics <command>`) whose options are fully
-documented via `--help`.
-
-```
- ┌──────────────┐
- │   ERA5 data  │
- └──────┬───────┘
-        │
-        ├─── Step 1a: compute-te ──────────► TE divergence (not smoothed)
-        ├─── Step 1b: compute-dhdt ────────► dh/dt files
-        ├─── Step 1c: compute-zonal-mse ──► Advective MSE files (u_mse + v_mse)
-        │
-        ▼
- ┌───────────────────────────────────────────────────────────┐
- │  Step 2: smooth-hoskins (Hoskins spectral filter)         │
- │  → filters dh/dt, ERA5 vint fields, and advective MSE    │
- │  → TE is NOT smoothed (already smooth from anomaly)       │
- └──────┬────────────────────────────────────────────────────┘
-        │
-        │  TRACK output
-        │       │
-        │       ▼
-        │  Step 3: process-tracks ──────► .npz arrays
-        │       │
-        │       ▼
-        │  Step 4: create-masks ────────► Cyclone/anticyclone masks
-        │       │
-        ▼       ▼
- ┌──────────────────────────────────────┐
- │  Step 5: integrate-fluxes            │──► Poleward-integrated flux NetCDFs
- │  (raw TE + smoothed dh/dt            │    (in PW)
- │   + smoothed vint + radiation        │
- │   + smoothed advective MSE)          │
- └──────┬───────────────────────────────┘
-        │
-        ▼
- ┌─────────────────────────────────┐
- │  Step 6: assign-fluxes          │──► Intensity-binned flux file
- └──────┬──────────────────────────┘
-        │
-        ▼
- ┌─────────────────────────────────┐
- │  Step 7a: build-composites      │──► Composites from integrated fluxes
- └──────┬──────────────────────────┘
-        │
- ┌─────────────────────────────────┐
- │  Step 7b: build-wm-composites   │──► Composites of local (W/m²) budget terms
- └──────┬──────────────────────────┘    (SHF residual, Z, VO, etc.)
-        │
-        ▼
- ┌─────────────────────────────────┐
- │  Step 8: condense-composites    │──► Condensed monthly file
- └──────┬──────────────────────────┘
-        │
-        ▼
- ┌─────────────────────────────────┐
- │  notebooks/final_figures.ipynb  │──► All paper figures
- └─────────────────────────────────┘
-```
-
-### Running individual steps
-
-```bash
-# Example: compute transient-eddy fluxes for 2000–2022
-cyclone-energetics compute-te \
-    --era5-base-directory /path/to/ERA5 \
-    --output-directory    /path/to/output/TE \
-    --year-start 2000 \
-    --year-end   2023
-
-# Example: compute dh/dt storage term
-cyclone-energetics compute-dhdt \
-    --era5-base-directory /path/to/ERA5 \
-    --output-directory    /path/to/output/dhdt \
-    --year-start 2000 \
-    --year-end   2023
-
-# Example: compute zonal MSE advection divergence
-cyclone-energetics compute-zonal-mse \
-    --era5-base-directory /path/to/ERA5 \
-    --output-directory    /path/to/output/zonal_mse \
-    --year-start 2000 \
-    --year-end   2023
-
-# Full help for any command
-cyclone-energetics integrate-fluxes --help
-```
-
----
-
-## Generating the paper figures
-
-After all processing steps have been completed, open the Jupyter notebook:
+After running the full pipeline, open the example notebook:
 
 ```bash
 jupyter lab notebooks/final_figures.ipynb
 ```
 
-The notebook loads the final output files and generates every figure in
-the paper.  Update the `BASE` path variable at the top of the notebook
-to point to the directory containing the pipeline output.
+Set `OUTPUT_ROOT` at the top of the notebook to point to your output directory.
 
 | Figure | Description |
 |--------|-------------|
-| 1 | 3-panel seasonality (total transport, footprint, efficiency) |
+| 1 | 3-panel seasonality (transport, footprint, efficiency) |
 | 2 | Area-percent and track-density seasonality |
 | 3 | Time and zonal-mean transient-eddy transport |
-| 4 | Weak vs strong cyclones energy budget bar chart |
-| 5 | Ocean vs land (NH, C+A and 6+ CVU) bar chart |
-| 6 | 2-D global maps of TE for weak and strong cyclones |
-| 7 | Cyclone-centred SH composites (SHF & TE, DJF−JJA) |
-
----
-
-## Key design decisions
-
-* **Spherical geometry** — All meridional integrations and divergences
-  use spherical coordinates (cos-latitude weighting, `d/d(lat_rad)`
-  scaled by `a·cos(lat)`).  Zonal advection divergence uses periodic
-  longitude boundaries.
-* **Below-ground masking** — Vertical integration uses a pressure-based
-  beta mask that smoothly transitions to zero for levels below the
-  surface.  Level 36 on the ERA5 37-level grid is always recalculated to
-  match the reference implementation.
-* **Transient-eddy anomalies** — The TE term uses anomalies from the
-  monthly mean (v' = v − ⟨v⟩, h' = h − ⟨h⟩) to isolate the sub-monthly
-  variability.  Storage (dh/dt) and zonal MSE advection use full fields.
-* **Vectorised integration** — Poleward integration operates on full
-  `(time, lat, lon)` arrays in a single pass (no Python loops over
-  timesteps or longitudes).
-* **Hoskins spectral filter** — The ERA5 vertically-integrated energy
-  terms (vint) and the storage term (dh/dt) are spectrally smoothed with
-  a Hoskins filter (n₀ = 60, r = 1, truncation T100) using NCL's
-  built-in spherical-harmonic routines (`shaeC` / `shseC`).  Python
-  drives the NCL script (`ncl/hoskins_filter.ncl`) by passing all
-  parameters via environment variables.  The transient-eddy (TE)
-  divergence is **not** smoothed because the monthly anomaly product is
-  already sufficiently smooth.
-* **Complete energy budget** — The pipeline computes every term of the
-  cyclone-centred MSE energy budget: transient eddy (TE), surface heat
-  flux (SHF), radiation (Swabs, OLR), MSE storage (dh/dt), zonal MSE
-  advection (u_mse), and meridional MSE advection (v_mse).
-* **SHF as a residual** — The surface heat flux (SHF) in W m⁻² is
-  calculated as a residual of the MSE budget:
-  `SHF = (vigd + vimdf·Lv + vithed) − (TSR − SSR) − TTR + dh/dt`.
-  This is computed in the W/m² composites (Step 7b) and does not require
-  separate ERA5 surface flux downloads.
-
----
-
-## Cyclone tracking
-
-Cyclone and anticyclone tracks are generated with the **TRACK** algorithm
-(Hoskins, B., & Hodges, K. I. (2019). The annual cycle of Northern Hemisphere
-storm tracks. Part I: Seasons. *J. Climate*, **32**, 1743–1760.
-[doi:10.1175/JCLI-D-17-0870](https://doi.org/10.1175/JCLI-D-17-0870)).
-
-TRACK also produces the filtered T42 vorticity fields used in the masking step.
-
----
-
-## Code standards
-
-| Rule | Convention |
-|------|-----------|
-| **Imports** | PEP 8 order (stdlib → third-party → local).  Always `import x`, never `from x import y`. |
-| **Type hints** | Throughout; validated with `mypy`. |
-| **Logging** | `_LOG.info('message: %s', value)` format — no f-strings. |
-| **Functions** | Keyword-only arguments after the first positional argument. |
-| **CLI** | Built with `typer`; file/directory arguments use `pathlib.Path`. |
-| **Formatting** | `ruff check --fix && ruff format`. |
-
----
+| 4 | Weak vs strong cyclones energy budget |
+| 5 | Ocean vs land energy budget (NH) |
+| 6 | 2-D global maps of TE |
+| 7 | Cyclone-centred composites (SHF & TE) |
 
 ## Citation
 
 If you use this code, please cite:
 
-```bibtex
-@article{sarro_barpanda_shaw_2025,
-  title   = {What Controls the Seasonality of Intense Cyclones?},
-  author  = {Sarro, Giorgio M. and Barpanda, Pragallva and Shaw, Tiffany A.},
-  journal = {Geophysical Research Letters},
-  year    = {2025},
-  note    = {In review}
-}
-```
-
----
+> Sarro, G. M., P. Barpanda, and T. A. Shaw, 2025: What Controls the Seasonality of Intense Cyclones? *Geophysical Research Letters*. In review.
 
 ## License
 
 MIT
+
+## Contact
+
+Giorgio M. Sarro — gmsarro@uchicago.edu

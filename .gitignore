@@ -1,57 +1,25 @@
-# Byte-compiled / cached
+# Byte-compiled / optimized
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Distribution / packaging
-build/
-dist/
 *.egg-info/
-*.egg
-
-# Virtual environments
-.venv/
-venv/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+dist/
+build/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Data (too large for git)
+# Output files
 *.nc
-*.npz
-*.csv
-*.zarr/
+*.pdf
+*.png
 
-# SLURM output
+# Cluster jobs
 *.out
 *.err
+*.log
 
-# mypy cache
-.mypy_cache/
-
-# pytest cache
-.pytest_cache/
-
-# ruff cache
-.ruff_cache/
-
-# Generated plot outputs
-notebooks/*.png
-notebooks/*.pdf
-*.sbatch
-nb_fig_fix_*.out
-
-# Local execution helpers (not for public repo)
-notebooks/run_figures_execute_only.py
-notebooks/run_final_figures.sbatch
-notebooks/plot_fig7_composites.py
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

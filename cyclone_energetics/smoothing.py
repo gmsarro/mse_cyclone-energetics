@@ -27,6 +27,8 @@ import os
 import pathlib
 import subprocess
 
+import netCDF4
+
 import cyclone_energetics.constants as constants
 
 _LOG = logging.getLogger(__name__)
@@ -133,8 +135,6 @@ def _detect_vint_variable_names(
     parameter IDs (p85.162, p84.162, p83.162) while newer files use short
     names (vigd, vimdf, vithed).  We check which convention the file uses.
     """
-    import netCDF4
-
     with netCDF4.Dataset(str(vint_path)) as ds:
         keys = list(ds.variables.keys())
 
