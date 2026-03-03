@@ -25,6 +25,7 @@ import numpy as np
 import numpy.typing as npt
 
 import cyclone_energetics.constants as constants
+import cyclone_energetics.era5 as era5
 
 _LOG = logging.getLogger(__name__)
 
@@ -143,10 +144,8 @@ def _process_single_month_te(
     z_path = era5_base_directory / "z" / ("era5_z_%d_%s.6hrly.nc" % (year, month))
     v_path = era5_base_directory / "v" / ("era5_v_%d_%s.6hrly.nc" % (year, month))
 
-    with netCDF4.Dataset(str(t_path)) as ds_t:
-        n_time = len(ds_t["time"][:])
-        latitude_now = np.array(ds_t["latitude"][:])
-        longitude_now = np.array(ds_t["longitude"][:])
+    latitude_now, longitude_now = era5.read_coordinates(t_path)
+    n_time = era5.read_n_time(t_path)
 
     n_lat = len(latitude_now)
     n_lon = len(longitude_now)
@@ -154,27 +153,19 @@ def _process_single_month_te(
     chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
     n_blocks = (n_lat + chunk - 1) // chunk
 
-    with netCDF4.Dataset(str(q_path)) as ds_q:
-        plev = np.array(ds_q["level"][:]) * 100.0
+    plev = era5.read_pressure_levels(q_path)
 
     for lat_block in range(n_blocks):
         lat_start = lat_block * chunk
         lat_end = min((lat_block + 1) * chunk, n_lat)
         _LOG.info("Latitude block: %s to %s", lat_start, lat_end)
 
-        s = np.s_[:, :, lat_start:lat_end, :]
+        lat_sl = slice(lat_start, lat_end)
 
-        with netCDF4.Dataset(str(t_path)) as ds_t:
-            ta = np.array(ds_t["t"][s].filled(fill_value=np.nan), dtype=np.float64)
-
-        with netCDF4.Dataset(str(q_path)) as ds_q:
-            hus = np.array(ds_q["q"][s].filled(fill_value=np.nan), dtype=np.float64)
-
-        with netCDF4.Dataset(str(ps_path)) as ds_ps:
-            ps = np.array(ds_ps["sp"][:, lat_start:lat_end, :], dtype=np.float64)
-
-        with netCDF4.Dataset(str(z_path)) as ds_z:
-            zg = np.array(ds_z["z"][s], dtype=np.float64) / constants.GRAVITY
+        ta = era5.read_field(t_path, "t", latitude_slice=lat_sl)
+        hus = era5.read_field(q_path, "q", latitude_slice=lat_sl)
+        ps = era5.read_field(ps_path, "sp", latitude_slice=lat_sl)
+        zg = era5.read_field(z_path, "z", latitude_slice=lat_sl) / constants.GRAVITY
 
         n_plev = plev.size
         n_chunk = lat_end - lat_start
@@ -199,8 +190,7 @@ def _process_single_month_te(
         )
         del ta, hus, zg
 
-        with netCDF4.Dataset(str(v_path)) as ds_v:
-            v = np.array(ds_v["v"][s].filled(fill_value=np.nan), dtype=np.float64)
+        v = era5.read_field(v_path, "v", latitude_slice=lat_sl)
 
         # Transient-eddy anomalies: subtract the monthly mean to isolate
         # sub-monthly (synoptic-scale) variability.

@@ -244,8 +244,12 @@ def create_cyclone_masks(
     output_directory.mkdir(parents=True, exist_ok=True)
 
     is_nh = hemisphere == "NH"
-    y1, y2 = (60, 121) if is_nh else (0, 61)
     vfac = 1 if is_nh else -1
+
+    lats_full = np.arange(-90, 90 + _TRACK_GRID_SPACING, _TRACK_GRID_SPACING)
+    equator_idx = np.argmin(np.abs(lats_full))
+    y1 = equator_idx if is_nh else 0
+    y2 = len(lats_full) if is_nh else equator_idx + 1
 
     cyclone_data = _load_track_npz(
         track_directory=track_directory,

@@ -27,6 +27,7 @@ import numpy as np
 import numpy.typing as npt
 
 import cyclone_energetics.constants as constants
+import cyclone_energetics.era5 as era5
 
 _LOG = logging.getLogger(__name__)
 
@@ -110,13 +111,9 @@ def _process_single_month_advection(
     u_path = era5_base_directory / "u" / ("era5_u_%d_%s.6hrly.nc" % (year, month))
     v_path = era5_base_directory / "v" / ("era5_v_%d_%s.6hrly.nc" % (year, month))
 
-    with netCDF4.Dataset(str(t_path)) as ds_t:
-        n_time = len(ds_t["time"][:])
-        latitude_now = np.array(ds_t["latitude"][:], dtype=np.float64)
-        longitude_now = np.array(ds_t["longitude"][:], dtype=np.float64)
-
-    with netCDF4.Dataset(str(q_path)) as ds_q:
-        plev = np.array(ds_q["level"][:], dtype=np.float64) * 100.0
+    latitude_now, longitude_now = era5.read_coordinates(t_path)
+    n_time = era5.read_n_time(t_path)
+    plev = era5.read_pressure_levels(q_path)
 
     n_lat = len(latitude_now)
     n_lon = len(longitude_now)
@@ -144,17 +141,13 @@ def _process_single_month_advection(
         lat_e = min((lat_block + 1) * chunk, n_lat)
         _LOG.info("  u_mse lat block: %s to %s", lat_s, lat_e)
 
-        s = np.s_[:, :, lat_s:lat_e, :]
         n_chunk = lat_e - lat_s
+        lat_sl = slice(lat_s, lat_e)
 
-        with netCDF4.Dataset(str(t_path)) as ds_t:
-            ta = np.array(ds_t["t"][s], dtype=np.float64)
-        with netCDF4.Dataset(str(q_path)) as ds_q:
-            hus = np.array(ds_q["q"][s], dtype=np.float64)
-        with netCDF4.Dataset(str(ps_path)) as ds_ps:
-            ps = np.array(ds_ps["sp"][:, lat_s:lat_e, :], dtype=np.float64)
-        with netCDF4.Dataset(str(z_path)) as ds_z:
-            zg = np.array(ds_z["z"][s], dtype=np.float64) / g
+        ta = era5.read_field(t_path, "t", latitude_slice=lat_sl)
+        hus = era5.read_field(q_path, "q", latitude_slice=lat_sl)
+        ps = era5.read_field(ps_path, "sp", latitude_slice=lat_sl)
+        zg = era5.read_field(z_path, "z", latitude_slice=lat_sl) / g
 
         ps_mean = np.mean(ps, axis=0)
         beta = _compute_beta_mask_timemean(
@@ -164,8 +157,7 @@ def _process_single_month_advection(
         mse = constants.CPD * ta + g * zg + constants.LATENT_HEAT_VAPORIZATION * hus
         del ta, hus, zg
 
-        with netCDF4.Dataset(str(u_path)) as ds_u:
-            u_wind = np.array(ds_u["u"][s], dtype=np.float64)
+        u_wind = era5.read_field(u_path, "u", latitude_slice=lat_sl)
 
         lat_rad_chunk = np.deg2rad(latitude_now[lat_s:lat_e])
         cos_lat_2d = np.cos(lat_rad_chunk)[:, np.newaxis]
@@ -234,16 +226,12 @@ def _process_single_month_advection(
         _LOG.info("  v_mse lon block: %s to %s", lon_s, lon_e)
 
         n_chunk = lon_e - lon_s
-        s = np.s_[:, :, :, lon_s:lon_e]
+        lon_sl = slice(lon_s, lon_e)
 
-        with netCDF4.Dataset(str(t_path)) as ds_t:
-            ta = np.array(ds_t["t"][s], dtype=np.float64)
-        with netCDF4.Dataset(str(q_path)) as ds_q:
-            hus = np.array(ds_q["q"][s], dtype=np.float64)
-        with netCDF4.Dataset(str(ps_path)) as ds_ps:
-            ps = np.array(ds_ps["sp"][:, :, lon_s:lon_e], dtype=np.float64)
-        with netCDF4.Dataset(str(z_path)) as ds_z:
-            zg = np.array(ds_z["z"][s], dtype=np.float64) / g
+        ta = era5.read_field(t_path, "t", longitude_slice=lon_sl)
+        hus = era5.read_field(q_path, "q", longitude_slice=lon_sl)
+        ps = era5.read_field(ps_path, "sp", longitude_slice=lon_sl)
+        zg = era5.read_field(z_path, "z", longitude_slice=lon_sl) / g
 
         ps_mean = np.mean(ps, axis=0)
         beta = _compute_beta_mask_timemean(
@@ -253,8 +241,7 @@ def _process_single_month_advection(
         mse = constants.CPD * ta + g * zg + constants.LATENT_HEAT_VAPORIZATION * hus
         del ta, hus, zg
 
-        with netCDF4.Dataset(str(v_path)) as ds_v:
-            v_wind = np.array(ds_v["v"][s], dtype=np.float64)
+        v_wind = era5.read_field(v_path, "v", longitude_slice=lon_sl)
 
         beta_for_div = np.copy(beta)
         beta_for_div[beta == 0] = np.nan

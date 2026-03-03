@@ -26,6 +26,7 @@ import numpy as np
 import numpy.typing as npt
 
 import cyclone_energetics.constants as constants
+import cyclone_energetics.era5 as era5
 
 _LOG = logging.getLogger(__name__)
 
@@ -101,13 +102,9 @@ def _process_single_month_dhdt(
     ps_path = era5_base_directory / "ps" / ("era5_ps_%d_%s.6hrly.nc" % (year, month))
     z_path = era5_base_directory / "z" / ("era5_z_%d_%s.6hrly.nc" % (year, month))
 
-    with netCDF4.Dataset(str(t_path)) as ds_t:
-        n_time = len(ds_t["time"][:])
-        latitude_now = np.array(ds_t["latitude"][:])
-        longitude_now = np.array(ds_t["longitude"][:])
-
-    with netCDF4.Dataset(str(q_path)) as ds_q:
-        plev = np.array(ds_q["level"][:]) * 100.0
+    latitude_now, longitude_now = era5.read_coordinates(t_path)
+    n_time = era5.read_n_time(t_path)
+    plev = era5.read_pressure_levels(q_path)
 
     n_lat = len(latitude_now)
     n_lon = len(longitude_now)
@@ -115,11 +112,9 @@ def _process_single_month_dhdt(
     chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
     n_blocks = (n_lat + chunk - 1) // chunk
 
-    # Use time-mean surface pressure for the beta mask.
-    with netCDF4.Dataset(str(ps_path)) as ds_ps:
-        ps_mean = np.mean(
-            np.array(ds_ps["sp"][:, :, :], dtype=np.float64), axis=0
-        )
+    ps_all = era5.read_field(ps_path, "sp")
+    ps_mean = np.mean(ps_all, axis=0)
+    del ps_all
 
     dvmsedt = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
 
@@ -144,18 +139,9 @@ def _process_single_month_dhdt(
         )
         del ps3d_chunk
 
-        # Read T and Q for all timesteps in this chunk
-        s = np.s_[:, :, lat_start:lat_end, :]
-
-        with netCDF4.Dataset(str(t_path)) as ds_t:
-            ta = np.array(
-                ds_t["t"][s].filled(fill_value=np.nan), dtype=np.float64
-            )
-
-        with netCDF4.Dataset(str(q_path)) as ds_q:
-            hus = np.array(
-                ds_q["q"][s].filled(fill_value=np.nan), dtype=np.float64
-            )
+        lat_sl = slice(lat_start, lat_end)
+        ta = era5.read_field(t_path, "t", latitude_slice=lat_sl)
+        hus = era5.read_field(q_path, "q", latitude_slice=lat_sl)
 
         # MSE = (c_p * T + L_v * q) * beta  (no geopotential for storage)
         beta_4d = beta[np.newaxis, :, :, :]

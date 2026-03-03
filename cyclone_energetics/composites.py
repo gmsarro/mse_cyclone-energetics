@@ -1,21 +1,12 @@
 from __future__ import annotations
 
-"""Cyclone-centred monthly composites on a storm-relative 0.25-degree grid.
+"""Cyclone-centred monthly composites on a storm-relative grid.
 
 Produces composites of both PW (meridionally integrated) and W/m² (local
-ERA5) energy-budget fields for weak and intense cyclones. Storm-track
-latitudes are derived from the flux-assignment data (F_TE_final zonal-mean
-peak/trough).
-
-Strategy: group track snapshots by (year, month), preload all needed 2D
-fields into numpy arrays once per month, then extract 120x120 patches via
-fast numpy fancy-indexing.
+ERA5) energy-budget fields for weak and intense cyclones.
 
 The SHF residual is computed as:
     SHF = column_MSE - Swabs - OLR + dh/dt
-
-This module unifies the old composites.py (PW only) and composites_wm.py
-(W/m² only) into a single-pass approach that produces both simultaneously.
 """
 
 import collections
@@ -39,7 +30,7 @@ _DRES: float = 0.25
 _NY: int = int(round(2 * _R_WINDOW_DEG / _DRES))
 _NX: int = _NY
 
-_STEPS_PER_YEAR: int = 365 * 4
+_STEPS_PER_YEAR: int = constants.TIMESTEPS_PER_YEAR
 _LAT_BAND_HALF_WIDTH: float = 5.0
 
 _GRAVITY: float = 9.81
