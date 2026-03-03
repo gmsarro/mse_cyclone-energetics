@@ -49,12 +49,13 @@ def _compute_beta_mask(
     Points fully above the surface (p_j_minus_1 < ps) get beta = 1.
     Points fully below the surface (p_j_plus_1 > ps)  get beta = 0.
 
-    Level index 36 (typically ~925 hPa on the ERA5 37-level grid) is
-    always recomputed to ensure the transition level is handled correctly,
-    matching the original implementation exactly.
+    The second-to-last level is always recomputed explicitly to ensure
+    the surface transition is handled correctly.
     """
     pa3d = pressure_levels_3d
     ps3d = surface_pressure_3d
+    n_plev = pa3d.shape[1]
+    surface_level = n_plev - 1
 
     p_j_minus_1 = np.copy(pa3d)
     p_j_plus_1 = np.copy(pa3d)
@@ -66,9 +67,9 @@ def _compute_beta_mask(
 
     beta = (ps3d - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
     beta[idx_above] = 1.0
-    beta[:, 36, :, :] = (
-        (ps3d[:, 36, :, :] - p_j_plus_1[:, 36, :, :])
-        / (p_j_minus_1[:, 36, :, :] - p_j_plus_1[:, 36, :, :])
+    beta[:, surface_level, :, :] = (
+        (ps3d[:, surface_level, :, :] - p_j_plus_1[:, surface_level, :, :])
+        / (p_j_minus_1[:, surface_level, :, :] - p_j_plus_1[:, surface_level, :, :])
     )
     beta[idx_below] = 0.0
 
@@ -200,9 +201,8 @@ def _process_single_month_te(
         with netCDF4.Dataset(str(v_path)) as ds_v:
             v = np.array(ds_v["v"][s].filled(fill_value=np.nan), dtype=np.float64)
 
-        # Transient-eddy anomalies: subtract the monthly (time) mean at
-        # every grid point to isolate the sub-monthly variability, matching
-        # the original make_TE_ERA5_1.py.
+        # Transient-eddy anomalies: subtract the monthly mean to isolate
+        # sub-monthly (synoptic-scale) variability.
         mse_prime = mse - np.mean(mse, axis=0, keepdims=True)
         v_prime = v - np.mean(v, axis=0, keepdims=True)
         del mse, v

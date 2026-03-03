@@ -15,8 +15,7 @@ time derivative is then vertically integrated and written to a NetCDF
 file.
 
 The computation is performed in latitude chunks to keep memory usage
-well below 8 GB per chunk, matching the strategy used in
-:mod:`cyclone_energetics.flux_computation`.
+within reasonable bounds.
 """
 
 import logging
@@ -68,6 +67,8 @@ def _compute_beta_mask_3d(
     """
     pa3d = pressure_levels_3d
     ps3d = surface_pressure_3d
+    n_plev = pa3d.shape[0]
+    surface_level = n_plev - 1
 
     p_j_minus_1 = np.copy(pa3d)
     p_j_plus_1 = np.copy(pa3d)
@@ -79,9 +80,9 @@ def _compute_beta_mask_3d(
 
     beta = (ps3d - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
     beta[idx_above] = 1.0
-    beta[36, :, :] = (
-        (ps3d[36, :, :] - p_j_plus_1[36, :, :])
-        / (p_j_minus_1[36, :, :] - p_j_plus_1[36, :, :])
+    beta[surface_level, :, :] = (
+        (ps3d[surface_level, :, :] - p_j_plus_1[surface_level, :, :])
+        / (p_j_minus_1[surface_level, :, :] - p_j_plus_1[surface_level, :, :])
     )
     beta[idx_below] = 0.0
 
@@ -113,7 +114,7 @@ def _process_single_month_dhdt(
     n_plev = plev.size
     chunk = _LATITUDE_CHUNK_SIZE
 
-    # The original code uses the time-mean surface pressure for the beta mask.
+    # Use time-mean surface pressure for the beta mask.
     with netCDF4.Dataset(str(ps_path)) as ds_ps:
         ps_mean = np.mean(
             np.array(ds_ps["sp"][:, :, :], dtype=np.float64), axis=0

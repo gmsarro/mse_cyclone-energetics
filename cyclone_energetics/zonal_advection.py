@@ -62,9 +62,10 @@ def _compute_beta_mask_timemean(
     ps_mean: npt.NDArray[np.floating],
     n_time: int,
 ) -> npt.NDArray[np.floating]:
-    """Beta mask using time-mean surface pressure, matching the original."""
+    """Beta mask using time-mean surface pressure."""
     n_plev = plev.size
     n_lat, n_lon = ps_mean.shape
+    surface_level = n_plev - 1
 
     ps3d = np.broadcast_to(
         ps_mean[np.newaxis, np.newaxis, :, :],
@@ -86,9 +87,9 @@ def _compute_beta_mask_timemean(
 
     beta = (ps3d - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
     beta[idx_above] = 1.0
-    beta[:, 36, :, :] = (
-        (ps3d[:, 36, :, :] - p_j_plus_1[:, 36, :, :])
-        / (p_j_minus_1[:, 36, :, :] - p_j_plus_1[:, 36, :, :])
+    beta[:, surface_level, :, :] = (
+        (ps3d[:, surface_level, :, :] - p_j_plus_1[:, surface_level, :, :])
+        / (p_j_minus_1[:, surface_level, :, :] - p_j_plus_1[:, surface_level, :, :])
     )
     beta[idx_below] = 0.0
 

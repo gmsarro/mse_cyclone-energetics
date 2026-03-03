@@ -2,9 +2,8 @@ from __future__ import annotations
 
 """Hoskins spectral filter for ERA5 derived fields.
 
-Drives the NCL script ``ncl/hoskins_filter.ncl`` which reproduces the
-original NCL-based Hoskins filter used in the analysis pipeline
-(``smooth_vint.ncl``, ``smooth_dh_dt_ERA5.ncl``).
+Drives the NCL script ``ncl/hoskins_filter.ncl`` which applies the
+Hoskins spectral filter (Sardeshmukh & Hoskins, 1984) to gridded data.
 
 The field is decomposed into spherical harmonics (``shaeC``), the
 spectral coefficients are truncated and multiplied by the Hoskins

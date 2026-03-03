@@ -18,7 +18,7 @@
 ;   SMOOTH_R            — Hoskins filter exponent          (default 1)
 ;
 ; Developer: Chanil Park (Seoul National University), adapted by G. M. Sarro
-; Reference: Hoskins, B. & Hodges, K. I. (2019), J. Climate, 32, 1743–1760.
+; Reference: Sardeshmukh, P. D. & Hoskins, B. J. (1984), Mon. Wea. Rev., 112, 2428–2443.
 
 begin
 
