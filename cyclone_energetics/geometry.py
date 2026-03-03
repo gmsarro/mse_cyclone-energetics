@@ -3,6 +3,8 @@ from __future__ import annotations
 import numpy as np
 import numpy.typing as npt
 
+import cyclone_energetics.constants as constants
+
 
 def lonlat_to_polar(
     *,
@@ -38,7 +40,7 @@ def spherical_distance(
     lons: npt.NDArray[np.floating],
     lats: npt.NDArray[np.floating],
 ) -> npt.NDArray[np.floating]:
-    re = 6.37e6
+    re = constants.EARTH_RADIUS
     conv = np.pi / 180.0
     lon0r = lon0 * conv
     lat0r = lat0 * conv

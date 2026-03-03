@@ -59,8 +59,9 @@ end if
 
 ; ================================================================
 ; Build Hoskins filter coefficients
+; Number of spectral coefficients is Thigh + 1
 ; ================================================================
-N = 721
+N = Thigh + 1
 nn = fspan(0, N-1, N)
 filter_coeff = exp(-1. * ((nn*(nn+1))/(n0*(n0+1)))^r)
 

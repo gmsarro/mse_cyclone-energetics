@@ -31,7 +31,7 @@ _LOG = logging.getLogger(__name__)
 # np.trapz was removed in NumPy 2.0; np.trapezoid is the replacement.
 _trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]
 
-_LATITUDE_CHUNK_SIZE: int = 72
+_DEFAULT_CHUNK_SIZE: int = 72
 
 
 def _compute_beta_mask(
@@ -151,14 +151,15 @@ def _process_single_month_te(
     n_lat = len(latitude_now)
     n_lon = len(longitude_now)
     dvmsedt = np.zeros((n_time, n_lat, n_lon))
-    chunk = _LATITUDE_CHUNK_SIZE
+    chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
+    n_blocks = (n_lat + chunk - 1) // chunk
 
     with netCDF4.Dataset(str(q_path)) as ds_q:
         plev = np.array(ds_q["level"][:]) * 100.0
 
-    for lat_block in range(n_lat // chunk):
+    for lat_block in range(n_blocks):
         lat_start = lat_block * chunk
-        lat_end = (lat_block + 1) * chunk
+        lat_end = min((lat_block + 1) * chunk, n_lat)
         _LOG.info("Latitude block: %s to %s", lat_start, lat_end)
 
         s = np.s_[:, :, lat_start:lat_end, :]

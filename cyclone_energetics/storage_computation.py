@@ -32,7 +32,7 @@ _LOG = logging.getLogger(__name__)
 # np.trapz was removed in NumPy 2.0; np.trapezoid is the replacement.
 _trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]
 
-_LATITUDE_CHUNK_SIZE: int = 72
+_DEFAULT_CHUNK_SIZE: int = 72
 _DT_CENTERED: float = 43200.0  # 12 h in seconds (centred difference)
 _DT_FORWARD: float = 21600.0   # 6 h in seconds (forward / backward diff)
 
@@ -112,7 +112,8 @@ def _process_single_month_dhdt(
     n_lat = len(latitude_now)
     n_lon = len(longitude_now)
     n_plev = plev.size
-    chunk = _LATITUDE_CHUNK_SIZE
+    chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
+    n_blocks = (n_lat + chunk - 1) // chunk
 
     # Use time-mean surface pressure for the beta mask.
     with netCDF4.Dataset(str(ps_path)) as ds_ps:
@@ -122,9 +123,9 @@ def _process_single_month_dhdt(
 
     dvmsedt = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
 
-    for lat_block in range(n_lat // chunk):
+    for lat_block in range(n_blocks):
         lat_start = lat_block * chunk
-        lat_end = (lat_block + 1) * chunk
+        lat_end = min((lat_block + 1) * chunk, n_lat)
         n_chunk = lat_end - lat_start
         _LOG.info("  Latitude block: %s to %s", lat_start, lat_end)
 

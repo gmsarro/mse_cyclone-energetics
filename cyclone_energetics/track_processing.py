@@ -107,7 +107,7 @@ def _compute_travel_distances(
 ]:
     total_points = len(longitude)
     n_events = len(track_id)
-    re = 6.37e6
+    re = constants.EARTH_RADIUS
     conv = np.pi / 180.0
     lont = longitude * conv
     latt = latitude * conv

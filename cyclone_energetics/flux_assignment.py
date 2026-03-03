@@ -24,25 +24,21 @@ _FLUX_NAMES: list[str] = [
     "F_v_mse",
 ]
 
-_N_LAT_ERA5: int = 719
-_N_LON_ERA5: int = 1440
-_N_LAT_TRACK: int = 121
-_N_LON_TRACK: int = 240
-
-
 def _interpolate_masks_to_era5(
     *,
     mask_data: npt.NDArray,
-    latitude_track: npt.NDArray,
-    longitude_track: npt.NDArray,
+    n_lat_target: int,
+    n_lon_target: int,
     n_time: int,
 ) -> npt.NDArray:
-    x = np.linspace(0, _N_LON_TRACK, _N_LON_TRACK)
-    y = np.linspace(0, _N_LAT_TRACK, _N_LAT_TRACK)
-    xi = np.linspace(0, _N_LON_TRACK, _N_LAT_ERA5 + 2)
-    yi = np.linspace(0, _N_LAT_TRACK, _N_LAT_ERA5 + 2)
+    """Interpolate mask data to target grid dimensions."""
+    n_lat_src, n_lon_src = mask_data.shape[1], mask_data.shape[2]
+    x = np.linspace(0, n_lon_src, n_lon_src)
+    y = np.linspace(0, n_lat_src, n_lat_src)
+    xi = np.linspace(0, n_lon_src, n_lon_target)
+    yi = np.linspace(0, n_lat_src, n_lat_target)
 
-    mask_interp = np.zeros((n_time, _N_LAT_ERA5 + 2, _N_LAT_ERA5 + 2), float)
+    mask_interp = np.zeros((n_time, n_lat_target, n_lon_target), float)
     for t in range(n_time):
         spline = scipy.interpolate.RectBivariateSpline(
             y, x, mask_data[t, :, :], kx=1, ky=1,
@@ -76,7 +72,16 @@ def assign_fluxes_with_intensity(
     output_directory.mkdir(parents=True, exist_ok=True)
     n_cuts = len(constants.INTENSITY_CUTS)
 
-    flux_shape = (n_cuts, 12, _N_LAT_ERA5, _N_LON_ERA5)
+    # Determine grid dimensions from first available file
+    first_year = year_start
+    first_month = constants.MONTH_STRINGS[0]
+    with netCDF4.Dataset(
+        str(integrated_flux_directory / ("Integrated_Fluxes_%d_%s_.nc" % (first_year, first_month)))
+    ) as ds:
+        n_lat_era5 = len(ds["lat"][:])
+        n_lon_era5 = len(ds["lon"][:])
+
+    flux_shape = (n_cuts, 12, n_lat_era5, n_lon_era5)
     flux_arrays = {
         name: {
             suffix: np.zeros(flux_shape, float)
@@ -124,6 +129,8 @@ def assign_fluxes_with_intensity(
                     mask_nh=mask_nh,
                     intensity_cut=cut_value,
                     n_time=max_day,
+                    n_lat_target=n_lat_era5,
+                    n_lon_target=n_lon_era5,
                 )
 
                 for name in _FLUX_NAMES:
@@ -225,7 +232,10 @@ def _combine_hemisphere_masks(
     mask_nh: dict[str, npt.NDArray],
     intensity_cut: int,
     n_time: int,
+    n_lat_target: int,
+    n_lon_target: int,
 ) -> tuple[npt.NDArray, npt.NDArray]:
+    """Combine NH and SH masks and interpolate to target grid."""
     cyc_sh = np.copy(mask_sh["flag_C"])
     ant_sh = np.copy(mask_sh["flag_A"])
     cyc_nh = np.copy(mask_nh["flag_C"])
@@ -243,18 +253,16 @@ def _combine_hemisphere_masks(
         (cyc_sh[:, :-1, :], cyc_nh), axis=1
     )[:, ::-1, :]
 
-    latitude_t = np.concatenate(
-        (mask_sh["lat"][:-1], mask_nh["lat"]), axis=0
-    )[::-1]
-    longitude_t = mask_nh["lon"]
+    n_lat_src = ant_combined.shape[1]
+    n_lon_src = ant_combined.shape[2]
 
-    x = np.linspace(0, 240, 240)
-    y = np.linspace(0, 121, 121)
-    xi = np.linspace(0, 240, _N_LON_ERA5)
-    yi = np.linspace(0, 121, _N_LAT_ERA5 + 2)
+    x = np.linspace(0, n_lon_src, n_lon_src)
+    y = np.linspace(0, n_lat_src, n_lat_src)
+    xi = np.linspace(0, n_lon_src, n_lon_target)
+    yi = np.linspace(0, n_lat_src, n_lat_target + 2)
 
-    ant_interp = np.zeros((n_time, _N_LAT_ERA5 + 2, _N_LON_ERA5), float)
-    cyc_interp = np.zeros((n_time, _N_LAT_ERA5 + 2, _N_LON_ERA5), float)
+    ant_interp = np.zeros((n_time, n_lat_target + 2, n_lon_target), float)
+    cyc_interp = np.zeros((n_time, n_lat_target + 2, n_lon_target), float)
 
     for t in range(n_time):
         spline_ant = scipy.interpolate.RectBivariateSpline(

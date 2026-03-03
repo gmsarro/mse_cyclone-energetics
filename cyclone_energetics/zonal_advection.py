@@ -32,7 +32,7 @@ _LOG = logging.getLogger(__name__)
 
 _trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]
 
-_LATITUDE_CHUNK_SIZE: int = 72
+_DEFAULT_CHUNK_SIZE: int = 72
 _GRADIENT_CLIP_ZONAL: float = 0.5
 _GRADIENT_CLIP_MERIDIONAL_FACTOR: float = 0.5
 
@@ -121,7 +121,9 @@ def _process_single_month_advection(
     n_lat = len(latitude_now)
     n_lon = len(longitude_now)
     n_plev = plev.size
-    chunk = _LATITUDE_CHUNK_SIZE
+    chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
+    n_lat_blocks = (n_lat + chunk - 1) // chunk
+    n_lon_blocks = (n_lon + chunk - 1) // chunk
     a = constants.EARTH_RADIUS
     g = constants.GRAVITY
 
@@ -137,9 +139,9 @@ def _process_single_month_advection(
     lon_mod[-1] = longitude_now[-1] + (longitude_now[1] - longitude_now[0])
     lon_rad_mod = np.deg2rad(lon_mod)
 
-    for lat_block in range(n_lat // chunk):
+    for lat_block in range(n_lat_blocks):
         lat_s = lat_block * chunk
-        lat_e = (lat_block + 1) * chunk
+        lat_e = min((lat_block + 1) * chunk, n_lat)
         _LOG.info("  u_mse lat block: %s to %s", lat_s, lat_e)
 
         s = np.s_[:, :, lat_s:lat_e, :]
@@ -226,9 +228,9 @@ def _process_single_month_advection(
     term_one_final = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
     lat_rad_full = np.deg2rad(latitude_now)
 
-    for lon_block in range(n_lon // chunk):
+    for lon_block in range(n_lon_blocks):
         lon_s = lon_block * chunk
-        lon_e = (lon_block + 1) * chunk
+        lon_e = min((lon_block + 1) * chunk, n_lon)
         _LOG.info("  v_mse lon block: %s to %s", lon_s, lon_e)
 
         n_chunk = lon_e - lon_s
