@@ -467,6 +467,12 @@ def compute_variability(
     years_per_file: typing_extensions.Annotated[
         int, typer.Option(help="Number of years stored per yearly flux file")
     ] = 5,
+    track_half_width: typing_extensions.Annotated[
+        float, typer.Option(help="Storm-track averaging half-width in degrees latitude")
+    ] = 10.0,
+    fine_grid_factor: typing_extensions.Annotated[
+        int, typer.Option(help="Latitude interpolation refinement factor")
+    ] = 36,
 ) -> None:
     """Step 9: Compute interannual variability for confidence bands."""
     _setup_logging()
@@ -480,6 +486,8 @@ def compute_variability(
         year_start=year_start,
         year_end=year_end,
         years_per_file=years_per_file,
+        track_half_width_deg=track_half_width,
+        fine_grid_factor=fine_grid_factor,
     )
     print("Done.")
 
