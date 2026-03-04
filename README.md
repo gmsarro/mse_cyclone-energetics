@@ -30,28 +30,38 @@ One importable Python package and one CLI with multiple commands:
 
 ## Quick Start
 
-The pipeline processes ERA5 reanalysis and TRACK algorithm output to compute the complete MSE budget for cyclones.
+The pipeline processes gridded reanalysis (ERA5, MERRA-2) or model output (GCM) and TRACK algorithm output to compute the complete MSE budget for cyclones.
 
 ### Step 1: Compute budget terms
 
 ```bash
 # Transient-eddy flux divergence
 cyclone-energetics compute-te \
-    --era5-base-directory /path/to/ERA5 \
+    --data-directory /path/to/data \
     --output-directory /path/to/output/TE \
     --year-start 2000 --year-end 2020
 
 # MSE storage term (dh/dt)
 cyclone-energetics compute-dhdt \
-    --era5-base-directory /path/to/ERA5 \
+    --data-directory /path/to/data \
     --output-directory /path/to/output/dhdt \
     --year-start 2000 --year-end 2020
 
 # Zonal MSE advection
 cyclone-energetics compute-zonal-mse \
-    --era5-base-directory /path/to/ERA5 \
+    --data-directory /path/to/data \
     --output-directory /path/to/output/adv_mse \
     --year-start 2000 --year-end 2020
+```
+
+For non-ERA5 data, pass a custom filename pattern:
+
+```bash
+cyclone-energetics compute-te \
+    --data-directory /path/to/merra2 \
+    --filename-pattern "merra2_{variable}_{year}_{month}.nc" \
+    --output-directory /path/to/output/TE \
+    --year-start 2002 --year-end 2004
 ```
 
 ### Step 2: Apply Hoskins spectral filter
@@ -59,7 +69,7 @@ cyclone-energetics compute-zonal-mse \
 ```bash
 cyclone-energetics smooth-hoskins \
     --dhdt-directory /path/to/output/dhdt \
-    --vint-directory /path/to/ERA5/vint \
+    --vint-directory /path/to/data/vint \
     --adv-mse-directory /path/to/output/adv_mse \
     --output-dhdt-directory /path/to/output/smoothed_dhdt \
     --output-vint-directory /path/to/output/smoothed_vint \
@@ -87,7 +97,7 @@ cyclone-energetics integrate-fluxes \
     --te-directory /path/to/output/TE \
     --dhdt-directory /path/to/output/smoothed_dhdt \
     --vint-directory /path/to/output/smoothed_vint \
-    --radiation-directory /path/to/ERA5/rad \
+    --radiation-directory /path/to/data/rad \
     --adv-mse-directory /path/to/output/smoothed_adv_mse \
     --output-directory /path/to/output/integrated \
     --year-start 2000 --year-end 2020
@@ -121,29 +131,39 @@ cyclone-energetics compute-te --help
 The package exposes functions for direct use in scripts and notebooks:
 
 ```python
+import pathlib
 import cyclone_energetics.flux_computation
 import cyclone_energetics.integration
 import cyclone_energetics.composites
 
-# Compute transient-eddy flux for a specific year range
 cyclone_energetics.flux_computation.compute_transient_eddy_flux(
     year_start=2015,
     year_end=2016,
-    era5_base_directory=pathlib.Path("/path/to/ERA5"),
+    data_directory=pathlib.Path("/path/to/data"),
     output_directory=pathlib.Path("/path/to/output"),
 )
-
-# Build cyclone-centred composites
-cyclone_energetics.composites.build_cyclone_composites(
-    year_start=2000,
-    year_end=2020,
-    hemisphere="SH",
-    intensity_min=6,
-    intensity_max=99,
-    track_path=pathlib.Path("/path/to/tracks.nc"),
-    # ... additional parameters
-)
 ```
+
+## Data Layout
+
+The computation modules expect input data organised in subdirectories by variable:
+
+```
+data_directory/
+├── t/    era5_t_YYYY_MM.6hrly.nc      (temperature)
+├── q/    era5_q_YYYY_MM.6hrly.nc      (specific humidity)
+├── ps/   era5_ps_YYYY_MM.6hrly.nc     (surface pressure)
+├── z/    era5_z_YYYY_MM.6hrly.nc      (geopotential)
+├── v/    era5_v_YYYY_MM.6hrly.nc      (meridional wind)
+└── u/    era5_u_YYYY_MM.6hrly.nc      (zonal wind)
+```
+
+The filename convention is controlled by `--filename-pattern`. The default
+pattern is `era5_{variable}_{year}_{month}.6hrly.nc`. For non-ERA5 data,
+provide a custom pattern, e.g. `merra2_{variable}_{year}_{month}.nc`.
+
+Subdirectory names and NetCDF variable names can be overridden programmatically
+via `gridded_data.DEFAULT_SUBDIRECTORIES` and `gridded_data.DEFAULT_VARIABLE_NAMES`.
 
 ## Configurable Parameters
 
@@ -152,6 +172,7 @@ All physical and numerical parameters are exposed as CLI options:
 | Parameter | Flag | Default | Description |
 |-----------|------|---------|-------------|
 | Year range | `--year-start`, `--year-end` | *required* | Processing period |
+| Filename pattern | `--filename-pattern` | `era5_{variable}_{year}_{month}.6hrly.nc` | Input file naming |
 | Hemisphere | `--hemisphere` | *required* | `NH` or `SH` |
 | Intensity range | `--intensity-min`, `--intensity-max` | 1, 99 | CVU intensity filter |
 | Area cut | `--area-cut` | 0.225 | Storm-track area threshold |
@@ -167,6 +188,7 @@ mse_cyclone-energetics/
 │   ├── cli.py               #   Typer CLI entry point
 │   ├── constants.py         #   Physical constants
 │   ├── geometry.py          #   Spherical coordinate utilities
+│   ├── gridded_data.py      #   Dimension-safe data reader (any reanalysis/GCM)
 │   ├── flux_computation.py  #   Transient-eddy flux divergence
 │   ├── storage_computation.py  # MSE storage term (dh/dt)
 │   ├── zonal_advection.py   #   Zonal MSE advection
@@ -181,6 +203,8 @@ mse_cyclone-energetics/
 │   └── hoskins_filter.ncl   # NCL Hoskins spectral filter script
 ├── notebooks/
 │   └── final_figures.ipynb  # Reproduce all paper figures
+├── tests/
+│   └── validate_numerics.py # Numerical identity validation
 ├── README.md
 ├── LICENSE
 └── .gitignore
@@ -201,7 +225,7 @@ mse_cyclone-energetics/
 
 | Dataset | Description |
 |---------|-------------|
-| **ERA5 6-hourly** | `t`, `q`, `ps`, `z`, `v`, `u`, `tsr`, `ssr`, `ttr`, `vint`, `t2m` |
+| **Gridded reanalysis / model output** | `t`, `q`, `ps`, `z`, `v`, `u`, `tsr`, `ssr`, `ttr`, `vint`, `t2m` |
 | **TRACK output** | Cyclone/anticyclone tracks and T42 filtered vorticity |
 
 ## Generating Paper Figures

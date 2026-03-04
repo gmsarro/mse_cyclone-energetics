@@ -21,17 +21,15 @@ NetCDF file per month.
 
 import logging
 import pathlib
+import typing
 
-import netCDF4
 import numpy as np
-import numpy.typing as npt
+import xarray
 
 import cyclone_energetics.constants as constants
-import cyclone_energetics.era5 as era5
+import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
-
-_trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]
 
 _DEFAULT_CHUNK_SIZE: int = 72
 _GRADIENT_CLIP_ZONAL: float = 0.5
@@ -42,82 +40,78 @@ def compute_zonal_advection(
     *,
     year_start: int,
     year_end: int,
-    era5_base_directory: pathlib.Path,
+    data_directory: pathlib.Path,
     output_directory: pathlib.Path,
+    filename_pattern: str = gridded_data.DEFAULT_FILENAME_PATTERN,
+    variable_names: typing.Optional[typing.Dict[str, str]] = None,
+    subdirectories: typing.Optional[typing.Dict[str, str]] = None,
 ) -> None:
     output_directory.mkdir(parents=True, exist_ok=True)
+    vnames = variable_names or gridded_data.DEFAULT_VARIABLE_NAMES
     for year in range(year_start, year_end):
         for month in constants.MONTH_STRINGS:
             _LOG.info("Computing MSE advection: year=%s month=%s", year, month)
             _process_single_month_advection(
                 year=year,
                 month=month,
-                era5_base_directory=era5_base_directory,
+                data_directory=data_directory,
                 output_directory=output_directory,
+                filename_pattern=filename_pattern,
+                variable_names=vnames,
+                subdirectories=subdirectories,
             )
 
 
-def _compute_beta_mask_timemean(
+def _resolve(
     *,
-    plev: npt.NDArray[np.floating],
-    ps_mean: npt.NDArray[np.floating],
-    n_time: int,
-) -> npt.NDArray[np.floating]:
-    """Beta mask using time-mean surface pressure."""
-    n_plev = plev.size
-    n_lat, n_lon = ps_mean.shape
-    surface_level = n_plev - 1
-
-    ps3d = np.broadcast_to(
-        ps_mean[np.newaxis, np.newaxis, :, :],
-        (n_time, n_plev, n_lat, n_lon),
-    ).copy()
-
-    pa3d = np.broadcast_to(
-        plev[np.newaxis, :, np.newaxis, np.newaxis],
-        (n_time, n_plev, n_lat, n_lon),
-    ).copy()
-
-    p_j_minus_1 = np.copy(pa3d)
-    p_j_plus_1 = np.copy(pa3d)
-    p_j_plus_1[:, 1:, :, :] = pa3d[:, :-1, :, :]
-    p_j_minus_1[:, 1:, :, :] = pa3d[:, 1:, :, :]
-
-    idx_below = p_j_plus_1 > ps3d
-    idx_above = p_j_minus_1 < ps3d
-
-    beta = (ps3d - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
-    beta[idx_above] = 1.0
-    beta[:, surface_level, :, :] = (
-        (ps3d[:, surface_level, :, :] - p_j_plus_1[:, surface_level, :, :])
-        / (p_j_minus_1[:, surface_level, :, :] - p_j_plus_1[:, surface_level, :, :])
+    data_directory: pathlib.Path,
+    field: str,
+    year: int,
+    month: str,
+    filename_pattern: str,
+    subdirectories: typing.Optional[typing.Dict[str, str]],
+) -> pathlib.Path:
+    return gridded_data.resolve_path(
+        data_directory=data_directory,
+        field=field,
+        year=year,
+        month=month,
+        filename_pattern=filename_pattern,
+        subdirectories=subdirectories,
     )
-    beta[idx_below] = 0.0
-
-    return beta
 
 
 def _process_single_month_advection(
     *,
     year: int,
     month: str,
-    era5_base_directory: pathlib.Path,
+    data_directory: pathlib.Path,
     output_directory: pathlib.Path,
+    filename_pattern: str,
+    variable_names: typing.Dict[str, str],
+    subdirectories: typing.Optional[typing.Dict[str, str]],
 ) -> None:
-    t_path = era5_base_directory / "t" / ("era5_t_%d_%s.6hrly.nc" % (year, month))
-    q_path = era5_base_directory / "q" / ("era5_q_%d_%s.6hrly.nc" % (year, month))
-    ps_path = era5_base_directory / "ps" / ("era5_ps_%d_%s.6hrly.nc" % (year, month))
-    z_path = era5_base_directory / "z" / ("era5_z_%d_%s.6hrly.nc" % (year, month))
-    u_path = era5_base_directory / "u" / ("era5_u_%d_%s.6hrly.nc" % (year, month))
-    v_path = era5_base_directory / "v" / ("era5_v_%d_%s.6hrly.nc" % (year, month))
+    kw = dict(
+        data_directory=data_directory, year=year, month=month,
+        filename_pattern=filename_pattern, subdirectories=subdirectories,
+    )
+    t_path = _resolve(field="temperature", **kw)
+    q_path = _resolve(field="specific_humidity", **kw)
+    ps_path = _resolve(field="surface_pressure", **kw)
+    z_path = _resolve(field="geopotential", **kw)
+    u_path = _resolve(field="zonal_wind", **kw)
+    v_path = _resolve(field="meridional_wind", **kw)
 
-    latitude_now, longitude_now = era5.read_coordinates(t_path)
-    n_time = era5.read_n_time(t_path)
-    plev = era5.read_pressure_levels(q_path)
+    vn = variable_names
+    latitude, longitude = gridded_data.read_coordinates(t_path)
+    n_time = gridded_data.read_n_time(t_path)
+    plev_pa = gridded_data.read_pressure_levels(q_path)
+    pressure_levels = xarray.DataArray(
+        plev_pa, dims=["level"], coords={"level": plev_pa},
+    )
 
-    n_lat = len(latitude_now)
-    n_lon = len(longitude_now)
-    n_plev = plev.size
+    n_lat = len(latitude)
+    n_lon = len(longitude)
     chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
     n_lat_blocks = (n_lat + chunk - 1) // chunk
     n_lon_blocks = (n_lon + chunk - 1) // chunk
@@ -131,9 +125,9 @@ def _process_single_month_advection(
     term_two_final = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
 
     lon_mod = np.zeros(n_lon + 2, dtype=np.float64)
-    lon_mod[1:-1] = longitude_now
-    lon_mod[0] = longitude_now[0] - (longitude_now[1] - longitude_now[0])
-    lon_mod[-1] = longitude_now[-1] + (longitude_now[1] - longitude_now[0])
+    lon_mod[1:-1] = longitude
+    lon_mod[0] = longitude[0] - (longitude[1] - longitude[0])
+    lon_mod[-1] = longitude[-1] + (longitude[1] - longitude[0])
     lon_rad_mod = np.deg2rad(lon_mod)
 
     for lat_block in range(n_lat_blocks):
@@ -144,69 +138,74 @@ def _process_single_month_advection(
         n_chunk = lat_e - lat_s
         lat_sl = slice(lat_s, lat_e)
 
-        ta = era5.read_field(t_path, "t", latitude_slice=lat_sl)
-        hus = era5.read_field(q_path, "q", latitude_slice=lat_sl)
-        ps = era5.read_field(ps_path, "sp", latitude_slice=lat_sl)
-        zg = era5.read_field(z_path, "z", latitude_slice=lat_sl) / g
+        ta = gridded_data.open_field(
+            t_path, vn["temperature"], latitude_slice=lat_sl,
+        ).assign_coords(level=plev_pa)
+        hus = gridded_data.open_field(
+            q_path, vn["specific_humidity"], latitude_slice=lat_sl,
+        ).assign_coords(level=plev_pa)
+        ps = gridded_data.open_field(
+            ps_path, vn["surface_pressure"], latitude_slice=lat_sl,
+        )
+        zg = (
+            gridded_data.open_field(
+                z_path, vn["geopotential"], latitude_slice=lat_sl,
+            ) / g
+        ).assign_coords(level=plev_pa)
 
-        ps_mean = np.mean(ps, axis=0)
-        beta = _compute_beta_mask_timemean(
-            plev=plev, ps_mean=ps_mean, n_time=n_time,
+        ps_mean = ps.mean(dim="time")
+        beta = gridded_data.compute_beta_mask(
+            pressure_levels=pressure_levels, surface_pressure=ps_mean,
         )
 
         mse = constants.CPD * ta + g * zg + constants.LATENT_HEAT_VAPORIZATION * hus
         del ta, hus, zg
 
-        u_wind = era5.read_field(u_path, "u", latitude_slice=lat_sl)
+        u_wind = gridded_data.open_field(
+            u_path, vn["zonal_wind"], latitude_slice=lat_sl,
+        ).assign_coords(level=plev_pa)
 
-        lat_rad_chunk = np.deg2rad(latitude_now[lat_s:lat_e])
-        cos_lat_2d = np.cos(lat_rad_chunk)[:, np.newaxis]
+        lat_rad_chunk = np.deg2rad(latitude[lat_s:lat_e])
+        cos_lat = np.cos(lat_rad_chunk)
 
-        beta_for_div = np.copy(beta)
-        beta_for_div[beta == 0] = np.nan
+        beta_for_div = beta.where(beta != 0, np.nan)
+        field_np = (mse * beta_for_div).values
+        n_plev = plev_pa.size
 
-        pa3d = np.broadcast_to(
-            plev[np.newaxis, :, np.newaxis, np.newaxis],
-            (n_time, n_plev, n_chunk, n_lon),
+        padded = np.empty(
+            (n_time, n_plev, n_chunk, n_lon + 2), dtype=np.float64,
+        )
+        padded[:, :, :, 1:-1] = field_np
+        padded[:, :, :, 0] = field_np[:, :, :, -1]
+        padded[:, :, :, -1] = field_np[:, :, :, 0]
+
+        cos_lat_4d = cos_lat[np.newaxis, np.newaxis, :, np.newaxis]
+        cos_lat_padded = np.broadcast_to(
+            cos_lat[np.newaxis, np.newaxis, :, np.newaxis],
+            (n_time, n_plev, n_chunk, n_lon + 2),
         )
 
-        term_two_div = np.zeros((n_time, n_plev, n_chunk, n_lon), dtype=np.float64)
+        lon_axis = 3
+        grad_lon = np.gradient(padded, lon_rad_mod, axis=lon_axis)
+        mse_div = (grad_lon / (a * cos_lat_padded))[:, :, :, 1:-1]
 
-        for t_idx in range(n_time):
-            for lev_idx in range(n_plev):
-                field_padded = np.zeros((n_chunk, n_lon + 2), dtype=np.float64)
-                field_padded[:, 1:-1] = (
-                    mse[t_idx, lev_idx, :, :]
-                    * beta_for_div[t_idx, lev_idx, :, :]
-                )
-                field_padded[:, 0] = (
-                    mse[t_idx, lev_idx, :, -1]
-                    * beta_for_div[t_idx, lev_idx, :, -1]
-                )
-                field_padded[:, -1] = (
-                    mse[t_idx, lev_idx, :, 0]
-                    * beta_for_div[t_idx, lev_idx, :, 0]
-                )
+        mse_div_clipped = np.where(
+            np.abs(mse_div) > _GRADIENT_CLIP_ZONAL, 0.0, mse_div,
+        )
 
-                cos_lat_padded = np.broadcast_to(
-                    cos_lat_2d, (n_chunk, n_lon + 2)
-                )
+        beta_np = beta.values
+        beta_4d = beta_np[np.newaxis, :, :, :] if beta_np.ndim == 3 else beta_np
+        u_np = u_wind.values
+        term_two_div = np.nan_to_num(
+            beta_4d * u_np * mse_div_clipped, nan=0.0,
+        )
 
-                grad_lon = np.gradient(field_padded, lon_rad_mod, axis=1)
-                mse_div = (grad_lon / (a * cos_lat_padded))[:, 1:-1]
-
-                mse_div_clipped = np.copy(mse_div)
-                mse_div_clipped[mse_div > _GRADIENT_CLIP_ZONAL] = 0.0
-                mse_div_clipped[mse_div < -_GRADIENT_CLIP_ZONAL] = 0.0
-
-                term_two_div[t_idx, lev_idx, :, :] = (
-                    beta[t_idx, lev_idx, :, :]
-                    * u_wind[t_idx, lev_idx, :, :]
-                    * mse_div_clipped
-                )
-
-        term_two_div = np.nan_to_num(term_two_div, nan=0.0)
-        sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
+        pa3d = np.broadcast_to(
+            plev_pa[np.newaxis, :, np.newaxis, np.newaxis],
+            (n_time, n_plev, n_chunk, n_lon),
+        )
+        sign = 1.0 if plev_pa[1] - plev_pa[0] > 0 else -1.0
+        _trapz = getattr(np, "trapezoid", None) or np.trapz
         term_two_final[:, lat_s:lat_e, :] = (
             sign / g * _trapz(term_two_div, pa3d, axis=1)
         )
@@ -218,7 +217,7 @@ def _process_single_month_advection(
     # v * beta * d(MSE*beta)/dlat / a
     # ------------------------------------------------------------------
     term_one_final = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
-    lat_rad_full = np.deg2rad(latitude_now)
+    lat_rad_full = np.deg2rad(latitude)
 
     for lon_block in range(n_lon_blocks):
         lon_s = lon_block * chunk
@@ -228,55 +227,58 @@ def _process_single_month_advection(
         n_chunk = lon_e - lon_s
         lon_sl = slice(lon_s, lon_e)
 
-        ta = era5.read_field(t_path, "t", longitude_slice=lon_sl)
-        hus = era5.read_field(q_path, "q", longitude_slice=lon_sl)
-        ps = era5.read_field(ps_path, "sp", longitude_slice=lon_sl)
-        zg = era5.read_field(z_path, "z", longitude_slice=lon_sl) / g
+        ta = gridded_data.open_field(
+            t_path, vn["temperature"], longitude_slice=lon_sl,
+        ).assign_coords(level=plev_pa)
+        hus = gridded_data.open_field(
+            q_path, vn["specific_humidity"], longitude_slice=lon_sl,
+        ).assign_coords(level=plev_pa)
+        ps = gridded_data.open_field(
+            ps_path, vn["surface_pressure"], longitude_slice=lon_sl,
+        )
+        zg = (
+            gridded_data.open_field(
+                z_path, vn["geopotential"], longitude_slice=lon_sl,
+            ) / g
+        ).assign_coords(level=plev_pa)
 
-        ps_mean = np.mean(ps, axis=0)
-        beta = _compute_beta_mask_timemean(
-            plev=plev, ps_mean=ps_mean, n_time=n_time,
+        ps_mean = ps.mean(dim="time")
+        beta = gridded_data.compute_beta_mask(
+            pressure_levels=pressure_levels, surface_pressure=ps_mean,
         )
 
         mse = constants.CPD * ta + g * zg + constants.LATENT_HEAT_VAPORIZATION * hus
         del ta, hus, zg
 
-        v_wind = era5.read_field(v_path, "v", longitude_slice=lon_sl)
+        v_wind = gridded_data.open_field(
+            v_path, vn["meridional_wind"], longitude_slice=lon_sl,
+        ).assign_coords(level=plev_pa)
 
-        beta_for_div = np.copy(beta)
-        beta_for_div[beta == 0] = np.nan
+        beta_for_div = beta.where(beta != 0, np.nan)
+        field_np = (mse * beta_for_div).values
+        n_plev = plev_pa.size
 
-        pa3d = np.broadcast_to(
-            plev[np.newaxis, :, np.newaxis, np.newaxis],
-            (n_time, n_plev, n_lat, n_chunk),
-        )
-
-        term_one_div = np.zeros(
-            (n_time, n_plev, n_lat, n_chunk), dtype=np.float64
-        )
+        lat_axis = field_np.ndim - 2
+        grad_lat = np.gradient(field_np, lat_rad_full, axis=lat_axis)
 
         clip_merid = _GRADIENT_CLIP_MERIDIONAL_FACTOR * a
+        dmse_dl = np.where(
+            np.abs(grad_lat) > clip_merid, 0.0, grad_lat,
+        )
 
-        for t_idx in range(n_time):
-            for lev_idx in range(n_plev):
-                field = (
-                    mse[t_idx, lev_idx, :, :]
-                    * beta_for_div[t_idx, lev_idx, :, :]
-                )
+        beta_np = beta.values
+        beta_4d = beta_np[np.newaxis, :, :, :] if beta_np.ndim == 3 else beta_np
+        v_np = v_wind.values
+        term_one_div = np.nan_to_num(
+            beta_4d * v_np * dmse_dl / a, nan=0.0,
+        )
 
-                grad_lat = np.gradient(field, lat_rad_full, axis=0)
-                dmse_dl = np.copy(grad_lat)
-                dmse_dl[grad_lat > clip_merid] = 0.0
-                dmse_dl[grad_lat < -clip_merid] = 0.0
-
-                term_one_div[t_idx, lev_idx, :, :] = (
-                    beta[t_idx, lev_idx, :, :]
-                    * v_wind[t_idx, lev_idx, :, :]
-                    * dmse_dl
-                ) / a
-
-        term_one_div = np.nan_to_num(term_one_div, nan=0.0)
-        sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
+        pa3d = np.broadcast_to(
+            plev_pa[np.newaxis, :, np.newaxis, np.newaxis],
+            (n_time, n_plev, n_lat, n_chunk),
+        )
+        sign = 1.0 if plev_pa[1] - plev_pa[0] > 0 else -1.0
+        _trapz = getattr(np, "trapezoid", None) or np.trapz
         term_one_final[:, :, lon_s:lon_e] = (
             sign / g * _trapz(term_one_div, pa3d, axis=1)
         )
@@ -287,36 +289,20 @@ def _process_single_month_advection(
     # Save output: Adv_YYYY_MM.nc  with variables v_mse and u_mse
     # ------------------------------------------------------------------
     out_path = output_directory / ("Adv_%d_%s.nc" % (year, month))
-    with netCDF4.Dataset(str(z_path)) as ds_z:
-        with netCDF4.Dataset(
-            str(out_path), "w", format="NETCDF4_CLASSIC"
-        ) as ds_out:
-            for name, dimension in ds_z.dimensions.items():
-                ds_out.createDimension(
-                    name,
-                    len(dimension) if not dimension.isunlimited() else None,
-                )
-            for name, variable in ds_z.variables.items():
-                if name == "z":
-                    continue
-                x = ds_out.createVariable(
-                    name, variable.datatype, variable.dimensions
-                )
-                x.setncatts(ds_z[name].__dict__)
-                x[:] = ds_z[name][:]
-
-            v_mse_var = ds_out.createVariable(
-                "v_mse", "f4", ("time", "latitude", "longitude")
-            )
-            v_mse_var.units = "J"
-            v_mse_var.long_name = "V*MSE"
-            v_mse_var[:, :, :] = term_one_final
-
-            u_mse_var = ds_out.createVariable(
-                "u_mse", "f4", ("time", "latitude", "longitude")
-            )
-            u_mse_var.units = "J"
-            u_mse_var.long_name = "U*MSE"
-            u_mse_var[:, :, :] = term_two_final
-
+    ds_out = xarray.Dataset(
+        {
+            "v_mse": (
+                ("time", "latitude", "longitude"),
+                term_one_final.astype(np.float32),
+                {"units": "J", "long_name": "V*MSE"},
+            ),
+            "u_mse": (
+                ("time", "latitude", "longitude"),
+                term_two_final.astype(np.float32),
+                {"units": "J", "long_name": "U*MSE"},
+            ),
+        },
+        coords={"latitude": latitude, "longitude": longitude},
+    )
+    ds_out.to_netcdf(str(out_path))
     _LOG.info("Saved advection file: %s", out_path)

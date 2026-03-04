@@ -9,10 +9,8 @@ computed as
     h = (c_p * T  +  L_v * q) * beta
 
 where *beta* is the below-ground weighting factor computed from the
-**time-mean** surface pressure (see
-:mod:`cyclone_energetics.flux_computation`).  The centred-difference
-time derivative is then vertically integrated and written to a NetCDF
-file.
+**time-mean** surface pressure.  The centred-difference time derivative
+is then vertically integrated and written to a NetCDF file.
 
 The computation is performed in latitude chunks to keep memory usage
 within reasonable bounds.
@@ -20,100 +18,99 @@ within reasonable bounds.
 
 import logging
 import pathlib
+import typing
 
-import netCDF4
 import numpy as np
-import numpy.typing as npt
+import xarray
 
 import cyclone_energetics.constants as constants
-import cyclone_energetics.era5 as era5
+import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
 
-# np.trapz was removed in NumPy 2.0; np.trapezoid is the replacement.
-_trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]
-
 _DEFAULT_CHUNK_SIZE: int = 72
-_DT_CENTERED: float = 43200.0  # 12 h in seconds (centred difference)
-_DT_FORWARD: float = 21600.0   # 6 h in seconds (forward / backward diff)
+_DT_CENTERED: float = 43200.0   # 12 h in seconds (centred difference)
+_DT_FORWARD: float = 21600.0    # 6 h in seconds (forward / backward diff)
 
 
 def compute_storage_term(
     *,
     year_start: int,
     year_end: int,
-    era5_base_directory: pathlib.Path,
+    data_directory: pathlib.Path,
     output_directory: pathlib.Path,
+    filename_pattern: str = gridded_data.DEFAULT_FILENAME_PATTERN,
+    variable_names: typing.Optional[typing.Dict[str, str]] = None,
+    subdirectories: typing.Optional[typing.Dict[str, str]] = None,
 ) -> None:
     output_directory.mkdir(parents=True, exist_ok=True)
+    vnames = variable_names or gridded_data.DEFAULT_VARIABLE_NAMES
     for year in range(year_start, year_end):
         for month in constants.MONTH_STRINGS:
             _LOG.info("Computing dh/dt: year=%s month=%s", year, month)
             _process_single_month_dhdt(
                 year=year,
                 month=month,
-                era5_base_directory=era5_base_directory,
+                data_directory=data_directory,
                 output_directory=output_directory,
+                filename_pattern=filename_pattern,
+                variable_names=vnames,
+                subdirectories=subdirectories,
             )
 
 
-def _compute_beta_mask_3d(
+def _resolve(
     *,
-    pressure_levels_3d: npt.NDArray[np.floating],
-    surface_pressure_3d: npt.NDArray[np.floating],
-) -> npt.NDArray[np.floating]:
-    """Compute below-ground beta mask for a single-timestep 3-D field.
-
-    Input shape: ``(n_plev, n_lat, n_lon)``.
-    """
-    pa3d = pressure_levels_3d
-    ps3d = surface_pressure_3d
-    n_plev = pa3d.shape[0]
-    surface_level = n_plev - 1
-
-    p_j_minus_1 = np.copy(pa3d)
-    p_j_plus_1 = np.copy(pa3d)
-    p_j_plus_1[1:, :, :] = pa3d[:-1, :, :]
-    p_j_minus_1[1:, :, :] = pa3d[1:, :, :]
-
-    idx_below = p_j_plus_1 > ps3d
-    idx_above = p_j_minus_1 < ps3d
-
-    beta = (ps3d - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
-    beta[idx_above] = 1.0
-    beta[surface_level, :, :] = (
-        (ps3d[surface_level, :, :] - p_j_plus_1[surface_level, :, :])
-        / (p_j_minus_1[surface_level, :, :] - p_j_plus_1[surface_level, :, :])
+    data_directory: pathlib.Path,
+    field: str,
+    year: int,
+    month: str,
+    filename_pattern: str,
+    subdirectories: typing.Optional[typing.Dict[str, str]],
+) -> pathlib.Path:
+    return gridded_data.resolve_path(
+        data_directory=data_directory,
+        field=field,
+        year=year,
+        month=month,
+        filename_pattern=filename_pattern,
+        subdirectories=subdirectories,
     )
-    beta[idx_below] = 0.0
-
-    return beta
 
 
 def _process_single_month_dhdt(
     *,
     year: int,
     month: str,
-    era5_base_directory: pathlib.Path,
+    data_directory: pathlib.Path,
     output_directory: pathlib.Path,
+    filename_pattern: str,
+    variable_names: typing.Dict[str, str],
+    subdirectories: typing.Optional[typing.Dict[str, str]],
 ) -> None:
-    t_path = era5_base_directory / "t" / ("era5_t_%d_%s.6hrly.nc" % (year, month))
-    q_path = era5_base_directory / "q" / ("era5_q_%d_%s.6hrly.nc" % (year, month))
-    ps_path = era5_base_directory / "ps" / ("era5_ps_%d_%s.6hrly.nc" % (year, month))
-    z_path = era5_base_directory / "z" / ("era5_z_%d_%s.6hrly.nc" % (year, month))
+    kw = dict(
+        data_directory=data_directory, year=year, month=month,
+        filename_pattern=filename_pattern, subdirectories=subdirectories,
+    )
+    t_path = _resolve(field="temperature", **kw)
+    q_path = _resolve(field="specific_humidity", **kw)
+    ps_path = _resolve(field="surface_pressure", **kw)
 
-    latitude_now, longitude_now = era5.read_coordinates(t_path)
-    n_time = era5.read_n_time(t_path)
-    plev = era5.read_pressure_levels(q_path)
+    vn = variable_names
+    latitude, longitude = gridded_data.read_coordinates(t_path)
+    n_time = gridded_data.read_n_time(t_path)
+    plev_pa = gridded_data.read_pressure_levels(q_path)
+    pressure_levels = xarray.DataArray(
+        plev_pa, dims=["level"], coords={"level": plev_pa},
+    )
 
-    n_lat = len(latitude_now)
-    n_lon = len(longitude_now)
-    n_plev = plev.size
+    n_lat = len(latitude)
+    n_lon = len(longitude)
     chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
     n_blocks = (n_lat + chunk - 1) // chunk
 
-    ps_all = era5.read_field(ps_path, "sp")
-    ps_mean = np.mean(ps_all, axis=0)
+    ps_all = gridded_data.open_field(ps_path, vn["surface_pressure"])
+    ps_mean = ps_all.mean(dim="time")
     del ps_all
 
     dvmsedt = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
@@ -124,87 +121,62 @@ def _process_single_month_dhdt(
         n_chunk = lat_end - lat_start
         _LOG.info("  Latitude block: %s to %s", lat_start, lat_end)
 
-        # Beta mask for this latitude chunk (time-invariant)
-        ps_chunk = ps_mean[lat_start:lat_end, :]
-        pa3d_single = np.broadcast_to(
-            plev[:, np.newaxis, np.newaxis], (n_plev, n_chunk, n_lon)
-        ).copy()
-        ps3d_chunk = np.broadcast_to(
-            ps_chunk[np.newaxis, :, :], (n_plev, n_chunk, n_lon)
-        ).copy()
-
-        beta = _compute_beta_mask_3d(
-            pressure_levels_3d=pa3d_single,
-            surface_pressure_3d=ps3d_chunk,
-        )
-        del ps3d_chunk
-
         lat_sl = slice(lat_start, lat_end)
-        ta = era5.read_field(t_path, "t", latitude_slice=lat_sl)
-        hus = era5.read_field(q_path, "q", latitude_slice=lat_sl)
+        ps_chunk = ps_mean.isel(latitude=lat_sl)
 
-        # MSE = (c_p * T + L_v * q) * beta  (no geopotential for storage)
-        beta_4d = beta[np.newaxis, :, :, :]
+        beta = gridded_data.compute_beta_mask(
+            pressure_levels=pressure_levels,
+            surface_pressure=ps_chunk,
+        )
+
+        ta = gridded_data.open_field(
+            t_path, vn["temperature"], latitude_slice=lat_sl,
+        ).assign_coords(level=plev_pa)
+        hus = gridded_data.open_field(
+            q_path, vn["specific_humidity"], latitude_slice=lat_sl,
+        ).assign_coords(level=plev_pa)
+
         mse = (
             constants.CPD * ta + constants.LATENT_HEAT_VAPORIZATION * hus
-        ) * beta_4d
-        del ta, hus, beta, beta_4d
+        ) * beta
+        del ta, hus, beta
 
-        # Centred-difference time tendency
-        dmsedt = np.empty_like(mse)
-        dmsedt[1:-1] = (mse[2:] - mse[:-2]) / _DT_CENTERED
-        dmsedt[0] = (mse[1] - mse[0]) / _DT_FORWARD
-        dmsedt[-1] = (mse[-1] - mse[-2]) / _DT_FORWARD
+        dmsedt = xarray.zeros_like(mse)
+        dmsedt[dict(time=slice(1, -1))] = (
+            (mse.isel(time=slice(2, None)).values
+             - mse.isel(time=slice(None, -2)).values)
+            / _DT_CENTERED
+        )
+        dmsedt[dict(time=0)] = (
+            (mse.isel(time=1).values - mse.isel(time=0).values) / _DT_FORWARD
+        )
+        dmsedt[dict(time=-1)] = (
+            (mse.isel(time=-1).values - mse.isel(time=-2).values) / _DT_FORWARD
+        )
         del mse
 
-        # Replace NaN with zero before integration (safety measure;
-        # ERA5 pressure-level data should not have missing values)
-        np.nan_to_num(dmsedt, copy=False, nan=0.0)
+        dmsedt = dmsedt.fillna(0.0)
 
-        # Vertically integrate — fully vectorised over time and longitude
-        pa3d = np.broadcast_to(
-            plev[np.newaxis, :, np.newaxis, np.newaxis],
-            (n_time, n_plev, n_chunk, n_lon),
-        )
-
-        sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
-        dvmsedt[:, lat_start:lat_end, :] = (
-            sign / constants.GRAVITY * _trapz(dmsedt, pa3d, axis=1)
-        )
+        sign = 1.0 if float(plev_pa[1] - plev_pa[0]) > 0 else -1.0
+        integrated = sign * dmsedt.integrate("level") / constants.GRAVITY
         del dmsedt
+
+        dvmsedt[:, lat_start:lat_end, :] = integrated.values
+        del integrated
         _LOG.info("  Block %s complete", lat_block)
 
     _LOG.info("Vertical integration complete for year=%s month=%s", year, month)
 
-    # Save output
     out_path = output_directory / ("tend_%d_%s_2.nc" % (year, month))
-    with netCDF4.Dataset(str(z_path)) as ds_z:
-        with netCDF4.Dataset(
-            str(out_path), "w", format="NETCDF4_CLASSIC"
-        ) as ds_out:
-            for name, dimension in ds_z.dimensions.items():
-                if "level" in name:
-                    continue
-                ds_out.createDimension(
-                    name,
-                    len(dimension) if not dimension.isunlimited() else None,
-                )
-            for name, variable in ds_z.variables.items():
-                if name in ("z", "level"):
-                    continue
-                x = ds_out.createVariable(
-                    name, variable.datatype, variable.dimensions
-                )
-                x.setncatts(ds_z[name].__dict__)
-                x[:] = ds_z[name][:]
-
-            tend_var = ds_out.createVariable(
-                "tend", "f4", ("time", "latitude", "longitude")
-            )
-            tend_var.units = "W/m^2"
-            tend_var.long_name = (
-                "time tendency of vertically integrated moist static energy"
-            )
-            tend_var[:, :, :] = dvmsedt
-
+    result = xarray.DataArray(
+        dvmsedt.astype(np.float32),
+        dims=("time", "latitude", "longitude"),
+        coords={"latitude": latitude, "longitude": longitude},
+    )
+    ds_out = result.to_dataset(name="tend")
+    ds_out["tend"].attrs = {
+        "units": "W/m^2",
+        "long_name": "time tendency of vertically integrated moist static energy",
+    }
+    ds_out.to_netcdf(str(out_path))
     _LOG.info("Saved dh/dt file: %s", out_path)

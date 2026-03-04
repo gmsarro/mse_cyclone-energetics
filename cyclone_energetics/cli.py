@@ -13,6 +13,7 @@ import cyclone_energetics.condensed_composites as condensed_composites
 import cyclone_energetics.constants as constants
 import cyclone_energetics.flux_assignment as flux_assignment
 import cyclone_energetics.flux_computation as flux_computation
+import cyclone_energetics.gridded_data as gridded_data
 import cyclone_energetics.integration as integration
 import cyclone_energetics.masking as masking
 import cyclone_energetics.smoothing as smoothing
@@ -32,8 +33,8 @@ def _setup_logging() -> None:
 
 @app.command()
 def compute_te(
-    era5_base_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Base ERA5 data directory")
+    data_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Base gridded data directory")
     ],
     output_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for TE flux files")
@@ -44,23 +45,27 @@ def compute_te(
     year_end: typing_extensions.Annotated[
         int, typer.Option(help="End year (exclusive)")
     ] = 2023,
+    filename_pattern: typing_extensions.Annotated[
+        str, typer.Option(help="Input filename pattern with {variable}, {year}, {month}")
+    ] = gridded_data.DEFAULT_FILENAME_PATTERN,
 ) -> None:
     """Step 1a: Compute transient-eddy (meridional) MSE flux divergence."""
     _setup_logging()
-    print("Computing transient eddy fluxes from ERA5")
+    print("Computing transient eddy fluxes")
     flux_computation.compute_transient_eddy_flux(
         year_start=year_start,
         year_end=year_end,
-        era5_base_directory=era5_base_directory,
+        data_directory=data_directory,
         output_directory=output_directory,
+        filename_pattern=filename_pattern,
     )
     print("Done.")
 
 
 @app.command()
 def compute_dhdt(
-    era5_base_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Base ERA5 data directory")
+    data_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Base gridded data directory")
     ],
     output_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for dh/dt files")
@@ -71,6 +76,9 @@ def compute_dhdt(
     year_end: typing_extensions.Annotated[
         int, typer.Option(help="End year (exclusive)")
     ] = 2023,
+    filename_pattern: typing_extensions.Annotated[
+        str, typer.Option(help="Input filename pattern with {variable}, {year}, {month}")
+    ] = gridded_data.DEFAULT_FILENAME_PATTERN,
 ) -> None:
     """Step 1b: Compute the MSE storage term dh/dt."""
     _setup_logging()
@@ -78,16 +86,17 @@ def compute_dhdt(
     storage_computation.compute_storage_term(
         year_start=year_start,
         year_end=year_end,
-        era5_base_directory=era5_base_directory,
+        data_directory=data_directory,
         output_directory=output_directory,
+        filename_pattern=filename_pattern,
     )
     print("Done.")
 
 
 @app.command()
 def compute_zonal_mse(
-    era5_base_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Base ERA5 data directory")
+    data_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Base gridded data directory")
     ],
     output_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for zonal advection files")
@@ -98,6 +107,9 @@ def compute_zonal_mse(
     year_end: typing_extensions.Annotated[
         int, typer.Option(help="End year (exclusive)")
     ] = 2023,
+    filename_pattern: typing_extensions.Annotated[
+        str, typer.Option(help="Input filename pattern with {variable}, {year}, {month}")
+    ] = gridded_data.DEFAULT_FILENAME_PATTERN,
 ) -> None:
     """Step 1c: Compute the zonal MSE advection divergence."""
     _setup_logging()
@@ -105,8 +117,9 @@ def compute_zonal_mse(
     zonal_advection.compute_zonal_advection(
         year_start=year_start,
         year_end=year_end,
-        era5_base_directory=era5_base_directory,
+        data_directory=data_directory,
         output_directory=output_directory,
+        filename_pattern=filename_pattern,
     )
     print("Done.")
 
@@ -117,7 +130,7 @@ def smooth_hoskins(
         pathlib.Path, typer.Option(help="Directory with raw dh/dt files")
     ],
     vint_directory: typing_extensions.Annotated[
-        pathlib.Path, typer.Option(help="Directory with raw ERA5 vint files")
+        pathlib.Path, typer.Option(help="Directory with raw vint files")
     ],
     output_dhdt_directory: typing_extensions.Annotated[
         pathlib.Path, typer.Option(help="Output directory for filtered dh/dt files")

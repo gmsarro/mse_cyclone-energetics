@@ -19,229 +19,187 @@ downstream pipeline steps.
 
 import logging
 import pathlib
+import typing
 
-import netCDF4
 import numpy as np
-import numpy.typing as npt
+import xarray
 
 import cyclone_energetics.constants as constants
-import cyclone_energetics.era5 as era5
+import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
-
-# np.trapz was removed in NumPy 2.0; np.trapezoid is the replacement.
-_trapz = getattr(np, "trapezoid", None) or np.trapz  # type: ignore[attr-defined]
 
 _DEFAULT_CHUNK_SIZE: int = 72
 
 
-def _compute_beta_mask(
-    *,
-    pressure_levels_3d: npt.NDArray[np.floating],
-    surface_pressure_3d: npt.NDArray[np.floating],
-) -> npt.NDArray[np.floating]:
-    """Compute the below-ground weighting factor (beta).
-
-    For each pressure level j the neighbours are defined as:
-      p_j_plus_1  = pa3d[:, j-1, :, :]   (the level above, lower pressure)
-      p_j_minus_1 = pa3d[:, j+1, :, :]   (the level below, higher pressure)
-
-    beta = (ps - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
-    Points fully above the surface (p_j_minus_1 < ps) get beta = 1.
-    Points fully below the surface (p_j_plus_1 > ps)  get beta = 0.
-
-    The second-to-last level is always recomputed explicitly to ensure
-    the surface transition is handled correctly.
-    """
-    pa3d = pressure_levels_3d
-    ps3d = surface_pressure_3d
-    n_plev = pa3d.shape[1]
-    surface_level = n_plev - 1
-
-    p_j_minus_1 = np.copy(pa3d)
-    p_j_plus_1 = np.copy(pa3d)
-    p_j_plus_1[:, 1:, :, :] = pa3d[:, :-1, :, :]
-    p_j_minus_1[:, 1:, :, :] = pa3d[:, 1:, :, :]
-
-    idx_below = p_j_plus_1 > ps3d
-    idx_above = p_j_minus_1 < ps3d
-
-    beta = (ps3d - p_j_plus_1) / (p_j_minus_1 - p_j_plus_1)
-    beta[idx_above] = 1.0
-    beta[:, surface_level, :, :] = (
-        (ps3d[:, surface_level, :, :] - p_j_plus_1[:, surface_level, :, :])
-        / (p_j_minus_1[:, surface_level, :, :] - p_j_plus_1[:, surface_level, :, :])
-    )
-    beta[idx_below] = 0.0
-
-    return beta
-
-
-def _compute_mse(
-    *,
-    temperature: npt.NDArray[np.floating],
-    specific_humidity: npt.NDArray[np.floating],
-    geopotential_height: npt.NDArray[np.floating],
-) -> npt.NDArray[np.floating]:
-    """Moist static energy: c_p*T + g*Z + L_v*q."""
-    return (
-        constants.CPD * temperature
-        + constants.GRAVITY * geopotential_height
-        + constants.LATENT_HEAT_VAPORIZATION * specific_humidity
-    )
-
-
 def _compute_divergence(
     *,
-    field: npt.NDArray[np.floating],
-    latitude: npt.NDArray[np.floating],
-) -> npt.NDArray[np.floating]:
-    """Meridional divergence on the sphere: (1/(a*cos(lat))) d/dlat [F*cos(lat)].
-
-    Fully vectorised over time and longitude (no Python loops).
-    """
-    lat_rad = np.deg2rad(latitude)
+    field: xarray.DataArray,
+) -> xarray.DataArray:
+    """Meridional divergence on the sphere: (1/(a cos φ)) ∂/∂φ [F cos φ]."""
+    lat_rad = np.deg2rad(field.latitude.values)
     cos_lat = np.cos(lat_rad)
+    lat_axis = field.dims.index("latitude")
 
-    cos_2d = cos_lat[np.newaxis, :, np.newaxis]
-    field_cos = field * cos_2d
+    shape = [1] * field.ndim
+    shape[lat_axis] = len(cos_lat)
+    cos_lat_nd = cos_lat.reshape(shape)
 
-    divergence = np.gradient(field_cos, lat_rad, axis=1) / (
-        constants.EARTH_RADIUS * cos_2d
+    field_cos = field.values * cos_lat_nd
+    grad = np.gradient(field_cos, lat_rad, axis=lat_axis)
+    divergence_values = grad / (constants.EARTH_RADIUS * cos_lat_nd)
+
+    return xarray.DataArray(
+        divergence_values,
+        dims=field.dims,
+        coords=field.coords,
     )
-    return divergence
 
 
 def compute_transient_eddy_flux(
     *,
     year_start: int,
     year_end: int,
-    era5_base_directory: pathlib.Path,
+    data_directory: pathlib.Path,
     output_directory: pathlib.Path,
+    filename_pattern: str = gridded_data.DEFAULT_FILENAME_PATTERN,
+    variable_names: typing.Optional[typing.Dict[str, str]] = None,
+    subdirectories: typing.Optional[typing.Dict[str, str]] = None,
 ) -> None:
     output_directory.mkdir(parents=True, exist_ok=True)
+    vnames = variable_names or gridded_data.DEFAULT_VARIABLE_NAMES
     for year in range(year_start, year_end):
         for month in constants.MONTH_STRINGS:
             _LOG.info("Processing TE flux: year=%s month=%s", year, month)
             _process_single_month_te(
                 year=year,
                 month=month,
-                era5_base_directory=era5_base_directory,
+                data_directory=data_directory,
                 output_directory=output_directory,
+                filename_pattern=filename_pattern,
+                variable_names=vnames,
+                subdirectories=subdirectories,
             )
+
+
+def _resolve(
+    *,
+    data_directory: pathlib.Path,
+    field: str,
+    year: int,
+    month: str,
+    filename_pattern: str,
+    subdirectories: typing.Optional[typing.Dict[str, str]],
+) -> pathlib.Path:
+    return gridded_data.resolve_path(
+        data_directory=data_directory,
+        field=field,
+        year=year,
+        month=month,
+        filename_pattern=filename_pattern,
+        subdirectories=subdirectories,
+    )
 
 
 def _process_single_month_te(
     *,
     year: int,
     month: str,
-    era5_base_directory: pathlib.Path,
+    data_directory: pathlib.Path,
     output_directory: pathlib.Path,
+    filename_pattern: str,
+    variable_names: typing.Dict[str, str],
+    subdirectories: typing.Optional[typing.Dict[str, str]],
 ) -> None:
-    t_path = era5_base_directory / "t" / ("era5_t_%d_%s.6hrly.nc" % (year, month))
-    q_path = era5_base_directory / "q" / ("era5_q_%d_%s.6hrly.nc" % (year, month))
-    ps_path = era5_base_directory / "ps" / ("era5_ps_%d_%s.6hrly.nc" % (year, month))
-    z_path = era5_base_directory / "z" / ("era5_z_%d_%s.6hrly.nc" % (year, month))
-    v_path = era5_base_directory / "v" / ("era5_v_%d_%s.6hrly.nc" % (year, month))
+    kw = dict(
+        data_directory=data_directory, year=year, month=month,
+        filename_pattern=filename_pattern, subdirectories=subdirectories,
+    )
+    t_path = _resolve(field="temperature", **kw)
+    q_path = _resolve(field="specific_humidity", **kw)
+    ps_path = _resolve(field="surface_pressure", **kw)
+    z_path = _resolve(field="geopotential", **kw)
+    v_path = _resolve(field="meridional_wind", **kw)
 
-    latitude_now, longitude_now = era5.read_coordinates(t_path)
-    n_time = era5.read_n_time(t_path)
+    vn = variable_names
+    latitude, longitude = gridded_data.read_coordinates(t_path)
+    n_time = gridded_data.read_n_time(t_path)
+    plev_pa = gridded_data.read_pressure_levels(q_path)
+    pressure_levels = xarray.DataArray(
+        plev_pa, dims=["level"], coords={"level": plev_pa},
+    )
 
-    n_lat = len(latitude_now)
-    n_lon = len(longitude_now)
-    dvmsedt = np.zeros((n_time, n_lat, n_lon))
+    n_lat = len(latitude)
+    n_lon = len(longitude)
     chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
     n_blocks = (n_lat + chunk - 1) // chunk
-
-    plev = era5.read_pressure_levels(q_path)
+    dvmsedt_values = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
 
     for lat_block in range(n_blocks):
         lat_start = lat_block * chunk
         lat_end = min((lat_block + 1) * chunk, n_lat)
         _LOG.info("Latitude block: %s to %s", lat_start, lat_end)
-
         lat_sl = slice(lat_start, lat_end)
 
-        ta = era5.read_field(t_path, "t", latitude_slice=lat_sl)
-        hus = era5.read_field(q_path, "q", latitude_slice=lat_sl)
-        ps = era5.read_field(ps_path, "sp", latitude_slice=lat_sl)
-        zg = era5.read_field(z_path, "z", latitude_slice=lat_sl) / constants.GRAVITY
-
-        n_plev = plev.size
-        n_chunk = lat_end - lat_start
-
-        ps3d = np.broadcast_to(
-            ps[:, np.newaxis, :, :], (n_time, n_plev, n_chunk, n_lon)
-        ).copy()
-        pa3d = np.broadcast_to(
-            plev[np.newaxis, :, np.newaxis, np.newaxis],
-            (n_time, n_plev, n_chunk, n_lon),
-        ).copy()
-
-        beta = _compute_beta_mask(
-            pressure_levels_3d=pa3d, surface_pressure_3d=ps3d
+        ta = gridded_data.open_field(
+            t_path, vn["temperature"], latitude_slice=lat_sl,
+        ).assign_coords(level=plev_pa)
+        hus = gridded_data.open_field(
+            q_path, vn["specific_humidity"], latitude_slice=lat_sl,
+        ).assign_coords(level=plev_pa)
+        ps = gridded_data.open_field(
+            ps_path, vn["surface_pressure"], latitude_slice=lat_sl,
         )
-        del ps3d
+        zg = (
+            gridded_data.open_field(
+                z_path, vn["geopotential"], latitude_slice=lat_sl,
+            )
+            / constants.GRAVITY
+        ).assign_coords(level=plev_pa)
 
-        mse = _compute_mse(
-            temperature=ta,
-            specific_humidity=hus,
-            geopotential_height=zg,
+        beta = gridded_data.compute_beta_mask(
+            pressure_levels=pressure_levels, surface_pressure=ps,
+        )
+
+        mse = (
+            constants.CPD * ta
+            + constants.GRAVITY * zg
+            + constants.LATENT_HEAT_VAPORIZATION * hus
         )
         del ta, hus, zg
 
-        v = era5.read_field(v_path, "v", latitude_slice=lat_sl)
+        v = gridded_data.open_field(
+            v_path, vn["meridional_wind"], latitude_slice=lat_sl,
+        ).assign_coords(level=plev_pa)
 
-        # Transient-eddy anomalies: subtract the monthly mean to isolate
-        # sub-monthly (synoptic-scale) variability.
-        mse_prime = mse - np.mean(mse, axis=0, keepdims=True)
-        v_prime = v - np.mean(v, axis=0, keepdims=True)
+        mse_prime = mse - mse.mean(dim="time")
+        v_prime = v - v.mean(dim="time")
         del mse, v
 
-        # NaN from .filled() below ground would poison trapz (0 * NaN = NaN
-        # in plain numpy); nan_to_num ensures beta=0 zeros dominate.
-        te_flux = np.nan_to_num(
-            v_prime * mse_prime * beta * beta, nan=0.0
-        )
+        te_flux = (v_prime * mse_prime * beta * beta).fillna(0.0)
         del v_prime, mse_prime, beta
 
-        sign = 1.0 if plev[1] - plev[0] > 0 else -1.0
-        dvmsedt[:, lat_start:lat_end, :] = (
-            sign / constants.GRAVITY * _trapz(te_flux, pa3d, axis=1)
-        )
-        del te_flux, pa3d
+        sign = 1.0 if float(plev_pa[1] - plev_pa[0]) > 0 else -1.0
+        integrated = sign * te_flux.integrate("level") / constants.GRAVITY
+        del te_flux
+
+        dvmsedt_values[:, lat_start:lat_end, :] = integrated.values
+        del integrated
         _LOG.info("Vertical integration completed for block %s", lat_block)
 
-    # Apply meridional divergence to the vertically integrated flux.
-    te_divergence = _compute_divergence(
-        field=dvmsedt, latitude=latitude_now
+    dvmsedt = xarray.DataArray(
+        dvmsedt_values,
+        dims=("time", "latitude", "longitude"),
+        coords={"latitude": latitude, "longitude": longitude},
     )
 
-    out_path = output_directory / ("TE_%d_%s.nc" % (year, month))
-    with netCDF4.Dataset(str(z_path)) as ds_z:
-        with netCDF4.Dataset(str(out_path), "w", format="NETCDF4_CLASSIC") as ds_out:
-            for name, dimension in ds_z.dimensions.items():
-                if "level" in name:
-                    continue
-                ds_out.createDimension(
-                    name,
-                    len(dimension) if not dimension.isunlimited() else None,
-                )
-            for name, variable in ds_z.variables.items():
-                if name in ("z", "level"):
-                    continue
-                x = ds_out.createVariable(
-                    name, variable.datatype, variable.dimensions
-                )
-                x.setncatts(ds_z[name].__dict__)
-                x[:] = ds_z[name][:]
+    te_divergence = _compute_divergence(field=dvmsedt)
 
-            te_var = ds_out.createVariable(
-                "TE", "f4", ("time", "latitude", "longitude")
-            )
-            te_var.units = "W m-2"
-            te_var.long_name = (
-                "divergence of vertically integrated transient-eddy MSE flux"
-            )
-            te_var[:, :, :] = te_divergence
+    out_path = output_directory / ("TE_%d_%s.nc" % (year, month))
+    ds_out = te_divergence.astype(np.float32).to_dataset(name="TE")
+    ds_out["TE"].attrs = {
+        "units": "W m-2",
+        "long_name": "divergence of vertically integrated transient-eddy MSE flux",
+    }
+    ds_out.to_netcdf(str(out_path))
     _LOG.info("Saved TE file: %s", out_path)
