@@ -19,6 +19,7 @@ import cyclone_energetics.masking as masking
 import cyclone_energetics.smoothing as smoothing
 import cyclone_energetics.storage_computation as storage_computation
 import cyclone_energetics.track_processing as track_processing
+import cyclone_energetics.variability as variability
 import cyclone_energetics.zonal_advection as zonal_advection
 
 app = typer.Typer(help="Cyclone energetics processing pipeline.")
@@ -435,6 +436,50 @@ def condense_composites(
         all_full_path=all_full,
         stormtrack_path=stormtrack,
         output_path=output_path,
+    )
+    print("Done.")
+
+
+@app.command()
+def compute_variability(
+    flux_file: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Main sampled flux file (.nc)")
+    ],
+    yearly_flux_files: typing_extensions.Annotated[
+        typing.List[pathlib.Path],
+        typer.Option(help="Per-year flux files (can specify multiple)")
+    ],
+    mask_sh_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with SH mask files (MASK_SH_{year}.nc)")
+    ],
+    mask_nh_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with NH mask files (MASK_NH_{year}.nc)")
+    ],
+    output_path: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Output NetCDF file path")
+    ],
+    year_start: typing_extensions.Annotated[
+        int, typer.Option(help="Start year (inclusive)")
+    ],
+    year_end: typing_extensions.Annotated[
+        int, typer.Option(help="End year (exclusive)")
+    ],
+    years_per_file: typing_extensions.Annotated[
+        int, typer.Option(help="Number of years stored per yearly flux file")
+    ] = 5,
+) -> None:
+    """Step 9: Compute interannual variability for confidence bands."""
+    _setup_logging()
+    print("Computing interannual variability")
+    variability.compute_interannual_variability(
+        flux_file=flux_file,
+        yearly_flux_files=yearly_flux_files,
+        mask_sh_directory=mask_sh_directory,
+        mask_nh_directory=mask_nh_directory,
+        output_path=output_path,
+        year_start=year_start,
+        year_end=year_end,
+        years_per_file=years_per_file,
     )
     print("Done.")
 

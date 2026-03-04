@@ -26,7 +26,7 @@ One importable Python package and one CLI with multiple commands:
 
 | Package | Import | CLI Commands |
 |---------|--------|--------------|
-| **cyclone_energetics** | `import cyclone_energetics` | `cyclone-energetics compute-te`, `compute-dhdt`, `compute-zonal-mse`, `smooth-hoskins`, `process-tracks`, `create-masks`, `integrate-fluxes`, `assign-fluxes`, `build-composites`, `condense-composites` |
+| **cyclone_energetics** | `import cyclone_energetics` | `cyclone-energetics compute-te`, `compute-dhdt`, `compute-zonal-mse`, `smooth-hoskins`, `process-tracks`, `create-masks`, `integrate-fluxes`, `assign-fluxes`, `build-composites`, `condense-composites`, `compute-variability` |
 
 ## Quick Start
 
@@ -119,6 +119,22 @@ cyclone-energetics build-composites \
     --hemisphere NH --year-start 2000 --year-end 2020
 ```
 
+### Step 6: Compute interannual variability (optional)
+
+For confidence bands in the final figures:
+
+```bash
+cyclone-energetics compute-variability \
+    --flux-file /path/to/output/sampled_fluxes.nc \
+    --yearly-flux-files /path/to/output/YEARS_0.nc \
+    --yearly-flux-files /path/to/output/YEARS_1.nc \
+    --yearly-flux-files /path/to/output/YEARS_2.nc \
+    --mask-sh-directory /path/to/output/masks/SH \
+    --mask-nh-directory /path/to/output/masks/NH \
+    --output-path /path/to/output/interannual_variability.nc \
+    --year-start 2000 --year-end 2015
+```
+
 Full help for any command:
 
 ```bash
@@ -198,7 +214,8 @@ mse_cyclone-energetics/
 │   ├── integration.py       #   Poleward flux integration
 │   ├── flux_assignment.py   #   Intensity-binned flux assignment
 │   ├── composites.py        #   Cyclone-centred composites
-│   └── condensed_composites.py  # Monthly condensed output
+│   ├── condensed_composites.py  # Monthly condensed output
+│   └── variability.py       #   Interannual variability for confidence bands
 ├── ncl/
 │   └── hoskins_filter.ncl   # NCL Hoskins spectral filter script
 ├── notebooks/

@@ -18,6 +18,7 @@ build/
 *.out
 *.err
 *.log
+*.sbatch
 
 # Local validation (not for public repo)
 tests/validate_numerics.py
