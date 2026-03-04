@@ -295,6 +295,21 @@ def _load_yearly_fluxes(
     return result
 
 
+def _sort_to_ascending(
+    lat: npt.NDArray,
+    field: npt.NDArray,
+) -> typing.Tuple[npt.NDArray, npt.NDArray]:
+    """Sort lat (and the corresponding lat-axis of field) to ascending.
+
+    Follows the same defensive pattern as composites._sort_coords:
+    never trust file metadata ordering — compare actual lat values.
+    """
+    if lat.size > 1 and lat[0] > lat[-1]:
+        lat = lat[::-1]
+        field = field[::-1, :]
+    return lat, field
+
+
 def _merge_hemispheres(
     field_sh: npt.NDArray,
     field_nh: npt.NDArray,
@@ -306,22 +321,28 @@ def _merge_hemispheres(
     """Concatenate SH and NH mask fields, removing duplicate equator rows
     and ordering to match the target latitude array.
 
-    Reads the actual latitude arrays from the mask files to determine
-    overlap and ordering — no hardcoded axis flips.
+    Both hemisphere arrays are first sorted to ascending latitude (S -> N)
+    using the actual lat values — not the file ordering — to guard against
+    inconsistent metadata.  Then overlapping equator rows are detected and
+    removed before concatenation.
     """
+    lat_sh, field_sh = _sort_to_ascending(lat_sh, field_sh)
+    lat_nh, field_nh = _sort_to_ascending(lat_nh, field_nh)
+
     tol = 0.5 * float(np.abs(np.diff(lat_sh[:2])))
 
-    # Find and remove duplicate latitudes between the two hemispheres
+    # Remove SH rows whose latitude already appears in the NH array
     overlap_mask = np.array([
         np.any(np.abs(lat_nh - lat_val) < tol) for lat_val in lat_sh
     ])
     field_sh_trimmed = field_sh[~overlap_mask, :]
     lat_sh_trimmed = lat_sh[~overlap_mask]
 
+    # Ascending: SH (negative lats) then NH (positive lats)
     combined_field = np.concatenate([field_sh_trimmed, field_nh], axis=0)
     combined_lat = np.concatenate([lat_sh_trimmed, lat_nh])
 
-    # Sort to match target latitude ordering (N->S or S->N)
+    # Re-order to match the target flux grid (may be N -> S)
     target_descending = target_lat[0] > target_lat[-1]
     sort_idx = np.argsort(combined_lat)
     if target_descending:
