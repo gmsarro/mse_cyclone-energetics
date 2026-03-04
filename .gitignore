@@ -19,6 +19,9 @@ build/
 *.err
 *.log
 
+# Local validation (not for public repo)
+tests/validate_numerics.py
+
 # IDE / OS
 .vscode/
 .idea/
