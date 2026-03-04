@@ -17,6 +17,7 @@ transport.  It is subsequently smoothed and poleward-integrated in
 downstream pipeline steps.
 """
 
+import gc
 import logging
 import pathlib
 import typing
@@ -29,7 +30,7 @@ import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
 
-_DEFAULT_CHUNK_SIZE: int = 72
+_DEFAULT_CHUNK_SIZE: int = 36
 
 
 def _compute_divergence(
@@ -185,6 +186,7 @@ def _process_single_month_te(
 
         dvmsedt_values[:, lat_start:lat_end, :] = integrated.values
         del integrated
+        gc.collect()
         _LOG.info("Vertical integration completed for block %s", lat_block)
 
     dvmsedt = xarray.DataArray(

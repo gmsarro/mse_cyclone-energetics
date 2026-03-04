@@ -16,6 +16,7 @@ The computation is performed in latitude chunks to keep memory usage
 within reasonable bounds.
 """
 
+import gc
 import logging
 import pathlib
 import typing
@@ -28,7 +29,7 @@ import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
 
-_DEFAULT_CHUNK_SIZE: int = 72
+_DEFAULT_CHUNK_SIZE: int = 36
 _DT_CENTERED: float = 43200.0   # 12 h in seconds (centred difference)
 _DT_FORWARD: float = 21600.0    # 6 h in seconds (forward / backward diff)
 
@@ -163,6 +164,7 @@ def _process_single_month_dhdt(
 
         dvmsedt[:, lat_start:lat_end, :] = integrated.values
         del integrated
+        gc.collect()
         _LOG.info("  Block %s complete", lat_block)
 
     _LOG.info("Vertical integration complete for year=%s month=%s", year, month)

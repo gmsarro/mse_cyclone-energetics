@@ -19,6 +19,7 @@ Both terms are then vertically integrated and written to a single
 NetCDF file per month.
 """
 
+import gc
 import logging
 import pathlib
 import typing
@@ -31,7 +32,7 @@ import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
 
-_DEFAULT_CHUNK_SIZE: int = 72
+_DEFAULT_CHUNK_SIZE: int = 36
 _GRADIENT_CLIP_ZONAL: float = 0.5
 _GRADIENT_CLIP_MERIDIONAL_FACTOR: float = 0.5
 
@@ -210,6 +211,7 @@ def _process_single_month_advection(
             sign / g * _trapz(term_two_div, pa3d, axis=1)
         )
         del term_two_div, mse, beta, beta_for_div, u_wind, ps
+        gc.collect()
         _LOG.info("  u_mse block %s complete", lat_block)
 
     # ------------------------------------------------------------------
@@ -283,6 +285,7 @@ def _process_single_month_advection(
             sign / g * _trapz(term_one_div, pa3d, axis=1)
         )
         del term_one_div, mse, beta, beta_for_div, v_wind, ps
+        gc.collect()
         _LOG.info("  v_mse block %s complete", lon_block)
 
     # ------------------------------------------------------------------
