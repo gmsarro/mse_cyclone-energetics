@@ -34,7 +34,7 @@ _LOG = logging.getLogger(__name__)
 
 # Locate the NCL script shipped with this package
 _NCL_SCRIPT: pathlib.Path = (
-    pathlib.Path(__file__).resolve().parent.parent.parent / "ncl" / "hoskins_filter.ncl"
+    pathlib.Path(__file__).resolve().parent.parent / "ncl" / "hoskins_filter.ncl"
 )
 
 

@@ -32,7 +32,7 @@ def _interpolate_masks_to_era5(
     n_time: int,
 ) -> npt.NDArray:
     """Interpolate mask data to target grid dimensions."""
-    n_lat_src, n_lon_src = mask_data.shape[1], mask_data.shape[2]
+    n_lat_src, n_lon_src = mask_data.shape[-2], mask_data.shape[-1]
     x = np.linspace(0, n_lon_src, n_lon_src)
     y = np.linspace(0, n_lat_src, n_lat_src)
     xi = np.linspace(0, n_lon_src, n_lon_target)
@@ -41,9 +41,9 @@ def _interpolate_masks_to_era5(
     mask_interp = np.zeros((n_time, n_lat_target, n_lon_target), float)
     for t in range(n_time):
         spline = scipy.interpolate.RectBivariateSpline(
-            y, x, mask_data[t, :, :], kx=1, ky=1,
+            y, x, mask_data[t], kx=1, ky=1,
         )
-        mask_interp[t, :, :] = spline(yi, xi)
+        mask_interp[t] = spline(yi, xi)
     return mask_interp
 
 
@@ -54,7 +54,7 @@ def _apply_mask(
     threshold: float = 0.5,
 ) -> npt.NDArray:
     masked = np.copy(flux_data)
-    idx_below = mask[:, 1:-1, :] < threshold
+    idx_below = mask[:, 1:-1] < threshold
     masked[idx_below] = 0.0
     return masked
 
@@ -182,13 +182,13 @@ def _load_monthly_fluxes(
             / ("Integrated_Fluxes_%d_%s_.nc" % (year, month))
         )
     ) as ds:
-        result["F_TE"] = ds["F_TE_final"][:max_day, :, :]
-        result["tot_energy"] = ds["tot_energy_final"][:max_day, :, :]
-        result["F_Shf"] = ds["F_Shf_final"][:max_day, :, :]
-        result["F_Swabs"] = ds["F_Swabs_final"][:max_day, :, :]
-        result["F_Olr"] = ds["F_Olr_final"][:max_day, :, :]
-        result["_lat"] = ds["lat"][:]
-        result["_lon"] = ds["lon"][:]
+        result["F_TE"] = np.array(ds["F_TE_final"][:max_day])
+        result["tot_energy"] = np.array(ds["tot_energy_final"][:max_day])
+        result["F_Shf"] = np.array(ds["F_Shf_final"][:max_day])
+        result["F_Swabs"] = np.array(ds["F_Swabs_final"][:max_day])
+        result["F_Olr"] = np.array(ds["F_Olr_final"][:max_day])
+        result["_lat"] = np.array(ds["lat"][:])
+        result["_lon"] = np.array(ds["lon"][:])
 
     with netCDF4.Dataset(
         str(
@@ -196,13 +196,13 @@ def _load_monthly_fluxes(
             / ("New_Integrated_Fluxes_%d_%s_.nc" % (year, month))
         )
     ) as ds:
-        result["F_Dhdt"] = ds["F_Dhdt_final"][:max_day, :, :]
+        result["F_Dhdt"] = np.array(ds["F_Dhdt_final"][:max_day])
         if "F_u_mse_final" in ds.variables:
-            result["F_u_mse"] = ds["F_u_mse_final"][:max_day, :, :]
+            result["F_u_mse"] = np.array(ds["F_u_mse_final"][:max_day])
         else:
             result["F_u_mse"] = np.zeros_like(result["F_Dhdt"])
         if "F_v_mse_final" in ds.variables:
-            result["F_v_mse"] = ds["F_v_mse_final"][:max_day, :, :]
+            result["F_v_mse"] = np.array(ds["F_v_mse_final"][:max_day])
         else:
             result["F_v_mse"] = np.zeros_like(result["F_Dhdt"])
 
@@ -219,10 +219,10 @@ def _load_mask_file(
         return {
             "lat": ds["lat"][:],
             "lon": ds["lon"][:],
-            "flag_A": ds["flag_A"][month_start:month_end, :, :],
-            "flag_C": ds["flag_C"][month_start:month_end, :, :],
-            "intensity_A": ds["intensity_A"][month_start:month_end, :, :],
-            "intensity_C": ds["intensity_C"][month_start:month_end, :, :],
+            "flag_A": np.array(ds["flag_A"][month_start:month_end]),
+            "flag_C": np.array(ds["flag_C"][month_start:month_end]),
+            "intensity_A": np.array(ds["intensity_A"][month_start:month_end]),
+            "intensity_C": np.array(ds["intensity_C"][month_start:month_end]),
         }
 
 
@@ -253,8 +253,8 @@ def _combine_hemisphere_masks(
         (cyc_sh[:, :-1, :], cyc_nh), axis=1
     )[:, ::-1, :]
 
-    n_lat_src = ant_combined.shape[1]
-    n_lon_src = ant_combined.shape[2]
+    n_lat_src = ant_combined.shape[-2]
+    n_lon_src = ant_combined.shape[-1]
 
     x = np.linspace(0, n_lon_src, n_lon_src)
     y = np.linspace(0, n_lat_src, n_lat_src)
@@ -266,13 +266,13 @@ def _combine_hemisphere_masks(
 
     for t in range(n_time):
         spline_ant = scipy.interpolate.RectBivariateSpline(
-            y, x, ant_combined[t, :, :], kx=1, ky=1,
+            y, x, ant_combined[t], kx=1, ky=1,
         )
-        ant_interp[t, :, :] = spline_ant(yi, xi)
+        ant_interp[t] = spline_ant(yi, xi)
         spline_cyc = scipy.interpolate.RectBivariateSpline(
-            y, x, cyc_combined[t, :, :], kx=1, ky=1,
+            y, x, cyc_combined[t], kx=1, ky=1,
         )
-        cyc_interp[t, :, :] = spline_cyc(yi, xi)
+        cyc_interp[t] = spline_cyc(yi, xi)
 
     return cyc_interp, ant_interp
 
@@ -321,6 +321,6 @@ def _save_assigned_fluxes(
                 var = wfile.createVariable(
                     var_name, "f4", ("intensity", "time", "lat", "lon")
                 )
-                var[:, :, :, :] = flux_arrays[name][suffix]
+                var[:] = flux_arrays[name][suffix]
 
     _LOG.info("Saved assigned fluxes: %s", output_path)

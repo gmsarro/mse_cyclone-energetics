@@ -38,6 +38,7 @@ _LV: float = 2.501e6
 _GEOPOTENTIAL_LEVEL: int = 30
 _Q_LEVEL: int = 35
 _VO_GRID_SIZE: int = 20
+_STORMTRACK_INTERP_NPTS: int = 25600
 
 _VINT_NAME_MAPS: typing.List[typing.Dict[str, str]] = [
     {"vigd": "vigd_filtered", "vimdf": "vimdf_filtered", "vithed": "vithed_filtered"},
@@ -129,13 +130,13 @@ def compute_stormtrack_latitudes(
     _LOG.info("Computing storm-track latitudes from %s", flux_assignment_path)
     with netCDF4.Dataset(str(flux_assignment_path)) as ds:
         lat = np.array(ds["lat"][:])
-        fte_total = np.array(ds["F_TE_final"][0, :, :, :])
+        fte_total = np.array(ds["F_TE_final"][0])
 
     fte_zonal = np.mean(fte_total, axis=2)
     nlat = len(lat)
     x_d = np.linspace(0, nlat - 1, nlat)
     y_d = np.linspace(0, 12, 12)
-    x3_d = np.linspace(0, nlat - 1, 25600)
+    x3_d = np.linspace(0, nlat - 1, _STORMTRACK_INTERP_NPTS)
 
     lat_fine = scipy.interpolate.interp1d(x_d, lat)(x3_d)
     fte_interp = scipy.interpolate.RectBivariateSpline(y_d, x_d, fte_zonal)(y_d, x3_d)

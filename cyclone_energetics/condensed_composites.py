@@ -14,6 +14,8 @@ import cyclone_energetics.constants as constants
 
 _LOG = logging.getLogger(__name__)
 
+_STORMTRACK_INTERP_NPTS: int = 25600
+
 
 def _read_monthly_3d(
     *,
@@ -49,12 +51,12 @@ def _compute_stormtrack_position(
 ) -> npt.NDArray:
     with netCDF4.Dataset(str(stormtrack_nc)) as ds:
         lat_st = ds["lat"][:]
-        f_te_final = ds["F_TE_final"][0, :, :, :]
+        f_te_final = np.array(ds["F_TE_final"][0])
         f_te_zon = np.mean(f_te_final, axis=2)
 
     nlat = lat_st.shape[0]
     x_d = np.linspace(0, nlat - 1, nlat)
-    x3_d = np.linspace(0, nlat - 1, 25600)
+    x3_d = np.linspace(0, nlat - 1, _STORMTRACK_INTERP_NPTS)
     lat_hi = scipy.interpolate.interp1d(x_d, lat_st)(x3_d)
 
     y_d = np.linspace(0, 12, 12)

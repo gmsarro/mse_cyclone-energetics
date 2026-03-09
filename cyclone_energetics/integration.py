@@ -35,6 +35,48 @@ def _resolve_vint_names(
     )
 
 
+def _poleward_integrate_core(
+    field: npt.NDArray[np.floating],
+    *,
+    latitude: npt.NDArray[np.floating],
+    reference_field: npt.NDArray[np.floating] | None = None,
+) -> npt.NDArray[np.floating]:
+    """Shared poleward-integration logic.
+
+    If *reference_field* is ``None``, the global mean of *field* itself is
+    subtracted (self-referencing mode).  Otherwise the global mean of
+    *reference_field* is subtracted.
+    """
+    lat_rad = np.deg2rad(latitude)
+    cos_lat = np.cos(lat_rad)
+
+    ref = field if reference_field is None else reference_field
+    mean_val = np.average(ref, weights=cos_lat, axis=0)
+
+    if field.ndim > 1:
+        field_anom = field - mean_val[np.newaxis, ...]
+        cos_broad = cos_lat.reshape((-1,) + (1,) * (field.ndim - 1))
+        field_weighted = field_anom * cos_broad
+    else:
+        field_anom = field - mean_val
+        field_weighted = field_anom * cos_lat
+
+    integral_south = scipy.integrate.cumulative_trapezoid(
+        field_weighted[::-1], lat_rad[::-1], axis=0, initial=None
+    )
+    integral_north = scipy.integrate.cumulative_trapezoid(
+        field_weighted, lat_rad, axis=0, initial=None
+    )
+    avg_integral = (
+        2.0
+        * np.pi
+        * constants.EARTH_RADIUS ** 2
+        * (integral_south[::-1][1:] + integral_north[:-1])
+        / 2.0
+    )
+    return avg_integral / 1e15
+
+
 def poleward_integration(
     field: npt.NDArray[np.floating],
     *,
@@ -53,35 +95,7 @@ def poleward_integration(
     Both north-to-south and south-to-north integrations are performed, and
     the average is returned to reduce accumulation bias.
     """
-    lat_rad = np.deg2rad(latitude)
-    cos_lat = np.cos(lat_rad)
-
-    weights = cos_lat
-    if field.ndim > 1:
-        extra_axes = tuple(range(1, field.ndim))
-        mean_val = np.average(field, weights=weights, axis=0)
-        field_anom = field - mean_val[np.newaxis, ...]
-        cos_broad = cos_lat.reshape((-1,) + (1,) * (field.ndim - 1))
-        field_weighted = field_anom * cos_broad
-    else:
-        mean_val = np.average(field, weights=weights, axis=0)
-        field_anom = field - mean_val
-        field_weighted = field_anom * cos_lat
-
-    integral_south = scipy.integrate.cumulative_trapezoid(
-        field_weighted[::-1], lat_rad[::-1], axis=0, initial=None
-    )
-    integral_north = scipy.integrate.cumulative_trapezoid(
-        field_weighted, lat_rad, axis=0, initial=None
-    )
-    avg_integral = (
-        2.0
-        * np.pi
-        * constants.EARTH_RADIUS ** 2
-        * (integral_south[::-1][1:] + integral_north[:-1])
-        / 2.0
-    )
-    return avg_integral / 1e15
+    return _poleward_integrate_core(field, latitude=latitude)
 
 
 def poleward_integration_individual(
@@ -92,32 +106,9 @@ def poleward_integration_individual(
 ) -> npt.NDArray[np.floating]:
     """Like :func:`poleward_integration` but subtracts the global mean of a
     *separate* reference field instead of the field itself."""
-    lat_rad = np.deg2rad(latitude)
-    cos_lat = np.cos(lat_rad)
-
-    mean_val = np.average(reference_field, weights=cos_lat, axis=0)
-    if field.ndim > 1:
-        field_anom = field - mean_val[np.newaxis, ...]
-        cos_broad = cos_lat.reshape((-1,) + (1,) * (field.ndim - 1))
-        field_weighted = field_anom * cos_broad
-    else:
-        field_anom = field - mean_val
-        field_weighted = field_anom * cos_lat
-
-    integral_south = scipy.integrate.cumulative_trapezoid(
-        field_weighted[::-1], lat_rad[::-1], axis=0, initial=None
+    return _poleward_integrate_core(
+        field, latitude=latitude, reference_field=reference_field,
     )
-    integral_north = scipy.integrate.cumulative_trapezoid(
-        field_weighted, lat_rad, axis=0, initial=None
-    )
-    avg_integral = (
-        2.0
-        * np.pi
-        * constants.EARTH_RADIUS ** 2
-        * (integral_south[::-1][1:] + integral_north[:-1])
-        / 2.0
-    )
-    return avg_integral / 1e15
 
 
 def _poleward_integrate_batch(
@@ -181,7 +172,7 @@ def integrate_fluxes_poleward(
                 time_vals = ds_te["time"][:max_day]
                 lat = ds_te["latitude"][:]
                 lon = ds_te["longitude"][:]
-                te_n = np.array(ds_te["TE"][:max_day, :, :])
+                te_n = np.array(ds_te["TE"][:max_day])
 
             with netCDF4.Dataset(
                 str(
@@ -189,7 +180,7 @@ def integrate_fluxes_poleward(
                     / ("tend_%d_%s_filtered_2.nc" % (year, month))
                 )
             ) as ds_dhdt:
-                dhdt = np.array(ds_dhdt["tend_filtered"][:max_day, ::-1, :])
+                dhdt = np.array(ds_dhdt["tend_filtered"][:max_day, ::-1])
 
             with netCDF4.Dataset(
                 str(
@@ -198,9 +189,9 @@ def integrate_fluxes_poleward(
                 )
             ) as ds_vint:
                 vn = _resolve_vint_names(ds=ds_vint)
-                vigd = np.array(ds_vint[vn["vigd"]][:max_day, ::-1, :])
-                vimdf = np.array(ds_vint[vn["vimdf"]][:max_day, ::-1, :])
-                vithed = np.array(ds_vint[vn["vithed"]][:max_day, ::-1, :])
+                vigd = np.array(ds_vint[vn["vigd"]][:max_day, ::-1])
+                vimdf = np.array(ds_vint[vn["vimdf"]][:max_day, ::-1])
+                vithed = np.array(ds_vint[vn["vithed"]][:max_day, ::-1])
 
             latitude = np.copy(np.asarray(lat))
 
@@ -215,13 +206,13 @@ def integrate_fluxes_poleward(
                 )
             ) as ds_rad:
                 tsr = np.nan_to_num(
-                    np.array(ds_rad["tsr"][:max_day, :, :]) / 3600.0, nan=0.0
+                    np.array(ds_rad["tsr"][:max_day]) / 3600.0, nan=0.0
                 )
                 ssr = np.nan_to_num(
-                    np.array(ds_rad["ssr"][:max_day, :, :]) / 3600.0, nan=0.0
+                    np.array(ds_rad["ssr"][:max_day]) / 3600.0, nan=0.0
                 )
                 ttr = np.nan_to_num(
-                    np.array(ds_rad["ttr"][:max_day, :, :]) / 3600.0, nan=0.0
+                    np.array(ds_rad["ttr"][:max_day]) / 3600.0, nan=0.0
                 )
 
             f_dhdt = np.nan_to_num(dhdt, nan=0.0)
@@ -268,11 +259,11 @@ def integrate_fluxes_poleward(
                         adv_lat = np.array(ds_adv["latitude"][::-1], dtype=np.float64)
                         adv_lon = np.array(ds_adv["longitude"][:], dtype=np.float64)
                         u_mse_raw = np.nan_to_num(
-                            np.array(ds_adv["u_mse_filtered"][:max_day, ::-1, :], dtype=np.float64),
+                            np.array(ds_adv["u_mse_filtered"][:max_day, ::-1], dtype=np.float64),
                             nan=0.0,
                         )
                         v_mse_raw = np.nan_to_num(
-                            np.array(ds_adv["v_mse_filtered"][:max_day, ::-1, :], dtype=np.float64),
+                            np.array(ds_adv["v_mse_filtered"][:max_day, ::-1], dtype=np.float64),
                             nan=0.0,
                         )
 
@@ -337,11 +328,11 @@ def _save_integrated_fluxes(
         lat_var[:] = lat
         lon_var[:] = lon
         time_var[:] = time_vals
-        te_var[:, :, :] = f_te
-        tot_var[:, :, :] = tot_energy
-        swabs_var[:, :, :] = f_swabs
-        olr_var[:, :, :] = f_olr
-        shf_var[:, :, :] = f_shf
+        te_var[:] = f_te
+        tot_var[:] = tot_energy
+        swabs_var[:] = f_swabs
+        olr_var[:] = f_olr
+        shf_var[:] = f_shf
     _LOG.info("Saved integrated fluxes: %s", output_path)
 
 
@@ -378,18 +369,18 @@ def _save_new_integrated_fluxes(
         lat_var[:] = lat
         lon_var[:] = lon
         time_var[:] = time_vals
-        dhdt_var[:, :, :] = f_dhdt
+        dhdt_var[:] = f_dhdt
 
         if f_u_mse is not None:
             u_mse_var = wfile.createVariable(
                 "F_u_mse_final", "f4", ("time", "lat", "lon")
             )
-            u_mse_var[:, :, :] = f_u_mse
+            u_mse_var[:] = f_u_mse
 
         if f_v_mse is not None:
             v_mse_var = wfile.createVariable(
                 "F_v_mse_final", "f4", ("time", "lat", "lon")
             )
-            v_mse_var[:, :, :] = f_v_mse
+            v_mse_var[:] = f_v_mse
 
     _LOG.info("Saved new integrated fluxes: %s", output_path)

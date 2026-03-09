@@ -317,7 +317,7 @@ def create_cyclone_masks(
                 int_del_c,
                 int_del_a,
             ) = _process_single_timestep(
-                vorticity=vo_data[t, :, :],
+                vorticity=vo_data[t],
                 vorticity_threshold=vorticity_threshold,
                 track_data_c=cyclone_data,
                 track_data_a=anticyclone_data,
@@ -331,14 +331,14 @@ def create_cyclone_masks(
                 p_xx_shape=p_xx.shape,
             )
 
-            all_mask_c[t, :, :] = mask_c
-            all_mask_a[t, :, :] = mask_a
-            all_flag_c[t, :, :] = flag_c
-            all_flag_a[t, :, :] = flag_a
-            all_int_c[t, :, :] = int_c
-            all_int_a[t, :, :] = int_a
-            all_int_del_c[t, :, :] = int_del_c
-            all_int_del_a[t, :, :] = int_del_a
+            all_mask_c[t] = mask_c
+            all_mask_a[t] = mask_a
+            all_flag_c[t] = flag_c
+            all_flag_a[t] = flag_a
+            all_int_c[t] = int_c
+            all_int_a[t] = int_a
+            all_int_del_c[t] = int_del_c
+            all_int_del_a[t] = int_del_a
 
         _save_mask_file(
             output_path=output_directory / ("MASK_%s_%d.nc" % (hemisphere, year)),
@@ -399,11 +399,11 @@ def _save_mask_file(
         lon_var[:] = lons
         time_var[:] = np.arange(constants.TIMESTEPS_PER_YEAR)
 
-        mc[:, :, :] = mask_c
-        ma[:, :, :] = mask_a
-        ic[:, :, :] = int_c
-        ia[:, :, :] = int_a
-        ic_del[:, :, :] = int_del_c
-        ia_del[:, :, :] = int_del_a
-        fc[:, :, :] = flag_c
-        fa[:, :, :] = flag_a
+        mc[:] = mask_c
+        ma[:] = mask_a
+        ic[:] = int_c
+        ia[:] = int_a
+        ic_del[:] = int_del_c
+        ia_del[:] = int_del_a
+        fc[:] = flag_c
+        fa[:] = flag_a
