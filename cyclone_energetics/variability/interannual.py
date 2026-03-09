@@ -10,6 +10,7 @@ import numpy.typing as npt
 import scipy.interpolate
 
 import cyclone_energetics.constants as constants
+import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
 
@@ -66,11 +67,11 @@ def _fine_lat(
 
 
 def _half_win_from_lat(
-    lat_fine: npt.NDArray,
+    latitude_fine: npt.NDArray,
     *,
     half_width_deg: float = _TRACK_HALF_WIDTH_DEG,
 ) -> int:
-    dlat = float(np.abs(lat_fine[1] - lat_fine[0]))
+    dlat = float(np.abs(latitude_fine[1] - latitude_fine[0]))
     return max(1, int(round(half_width_deg / dlat)))
 
 
@@ -92,11 +93,16 @@ def _interp_mask_field(
 def _stormtrack_from_total_fte(
     fte_zon_int: npt.NDArray,
     *,
-    lat_fine: npt.NDArray,
+    latitude_fine: npt.NDArray,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
-    st_nh = np.argmax(fte_zon_int, axis=1)
-    st_sh = np.argmin(fte_zon_int, axis=1)
-    return st_nh, st_sh, lat_fine[st_nh], lat_fine[st_sh]
+    stormtrack_index_nh = np.argmax(fte_zon_int, axis=1)
+    stormtrack_index_sh = np.argmin(fte_zon_int, axis=1)
+    return (
+        stormtrack_index_nh,
+        stormtrack_index_sh,
+        latitude_fine[stormtrack_index_nh],
+        latitude_fine[stormtrack_index_sh],
+    )
 
 
 def _mean_around_track(
@@ -132,19 +138,19 @@ def _seasonal_diff(x: npt.NDArray) -> float:
 
 
 def _band_from_lines(
-    arr: npt.NDArray,
+    lines_array: npt.NDArray,
 ) -> typing.Tuple[float, npt.NDArray, npt.NDArray]:
-    std_per_month = np.std(arr, axis=0)
+    std_per_month = np.std(lines_array, axis=0)
     mean_std = np.mean(std_per_month, axis=1)
     return float(np.max(mean_std)), mean_std, std_per_month
 
 
 def _nearest_idx(
-    arr: npt.NDArray,
+    values: npt.NDArray,
     *,
     val: float,
 ) -> int:
-    return int(np.argmin(np.abs(arr - val)))
+    return int(np.argmin(np.abs(values - val)))
 
 
 def _build_land_ocean_masks(
@@ -216,30 +222,30 @@ def _load_yearly_fluxes(
         )
 
     result: typing.Dict[str, npt.NDArray] = {}
-    with netCDF4.Dataset(str(yearly_files[stage])) as ds:
+    with netCDF4.Dataset(str(yearly_files[stage])) as dataset:
         for icut in (0, 5):
             for suffix in ("", "_cycl", "_ant"):
-                vn_te = "F_TE_final%s" % suffix
-                if vn_te in ds.variables:
-                    arr = ds[vn_te][icut, :, yr_in_file, :, :]
-                    result["F_TE%s_%d" % (suffix, icut)] = np.mean(arr, axis=-1)
+                variable_name_te = "F_TE_final%s" % suffix
+                if variable_name_te in dataset.variables:
+                    flux_data = dataset[variable_name_te][icut, :, yr_in_file, :, :]
+                    result["F_TE%s_%d" % (suffix, icut)] = np.mean(flux_data, axis=-1)
 
-                for vn_base in ("F_Swabs_final", "F_Olr_final", "F_Dhdt_final",
+                for variable_name_base in ("F_Swabs_final", "F_Olr_final", "F_Dhdt_final",
                                 "tot_energy_final", "F_TE_z_final", "F_UM_z_final"):
-                    vn = "%s%s" % (vn_base, suffix)
-                    if vn in ds.variables:
-                        arr = ds[vn][icut, :, yr_in_file, :, :]
-                        key = "%s%s_%d" % (vn_base.replace("_final", ""), suffix, icut)
-                        result[key] = np.mean(arr, axis=-1)
+                    variable_name = "%s%s" % (variable_name_base, suffix)
+                    if variable_name in dataset.variables:
+                        flux_data = dataset[variable_name][icut, :, yr_in_file, :, :]
+                        key = "%s%s_%d" % (variable_name_base.replace("_final", ""), suffix, icut)
+                        result[key] = np.mean(flux_data, axis=-1)
 
             for suffix in ("_cycl", "_ant"):
-                for vn_base in ("F_TE_final", "F_Swabs_final", "F_Olr_final",
+                for variable_name_base in ("F_TE_final", "F_Swabs_final", "F_Olr_final",
                                 "F_Dhdt_final", "tot_energy_final",
                                 "F_TE_z_final", "F_UM_z_final"):
-                    vn = "%s%s" % (vn_base, suffix)
-                    if vn in ds.variables:
-                        key = "2d_%s%s_%d" % (vn_base.replace("_final", ""), suffix, icut)
-                        result[key] = np.asarray(ds[vn][icut, :, yr_in_file, :, :])
+                    variable_name = "%s%s" % (variable_name_base, suffix)
+                    if variable_name in dataset.variables:
+                        key = "2d_%s%s_%d" % (variable_name_base.replace("_final", ""), suffix, icut)
+                        result[key] = np.asarray(dataset[variable_name][icut, :, yr_in_file, :, :])
 
     return result
 
@@ -300,19 +306,21 @@ def _compute_yearly_area(
     typing.Dict[int, npt.NDArray], typing.Dict[int, npt.NDArray],
     typing.Dict[int, npt.NDArray], typing.Dict[int, npt.NDArray],
 ]:
-    with netCDF4.Dataset(str(mask_sh_path)) as ds:
-        flag_C_sh = np.asarray(ds["flag_C"][:])
-        flag_A_sh = np.asarray(ds["flag_A"][:])
-        int_C_sh = np.asarray(ds["intensity_C"][:])
-        int_A_sh = np.asarray(ds["intensity_A"][:])
-        lat_sh = np.asarray(ds["lat"][:])
+    with netCDF4.Dataset(str(mask_sh_path)) as dataset:
+        flag_C_sh = np.asarray(dataset["flag_C"][:])
+        flag_A_sh = np.asarray(dataset["flag_A"][:])
+        int_C_sh = np.asarray(dataset["intensity_C"][:])
+        int_A_sh = np.asarray(dataset["intensity_A"][:])
+        lat_key_sh = gridded_data.resolve_dimension_name(dataset, standard_name="latitude")
+        lat_sh = np.asarray(dataset[lat_key_sh][:])
 
-    with netCDF4.Dataset(str(mask_nh_path)) as ds:
-        flag_C_nh = np.asarray(ds["flag_C"][:])
-        flag_A_nh = np.asarray(ds["flag_A"][:])
-        int_C_nh = np.asarray(ds["intensity_C"][:])
-        int_A_nh = np.asarray(ds["intensity_A"][:])
-        lat_nh = np.asarray(ds["lat"][:])
+    with netCDF4.Dataset(str(mask_nh_path)) as dataset:
+        flag_C_nh = np.asarray(dataset["flag_C"][:])
+        flag_A_nh = np.asarray(dataset["flag_A"][:])
+        int_C_nh = np.asarray(dataset["intensity_C"][:])
+        int_A_nh = np.asarray(dataset["intensity_A"][:])
+        lat_key_nh = gridded_data.resolve_dimension_name(dataset, standard_name="latitude")
+        lat_nh = np.asarray(dataset[lat_key_nh][:])
 
     n_lat = target_lat.shape[0]
     n_lon = target_lon.shape[0]
@@ -414,9 +422,9 @@ def _compute_3term_decomp_yearly(
     *,
     area_nh: npt.NDArray,
     area_sh: npt.NDArray,
-    st_nh: npt.NDArray,
-    st_sh: npt.NDArray,
-    lat_f: npt.NDArray,
+    stormtrack_index_nh: npt.NDArray,
+    stormtrack_index_sh: npt.NDArray,
+    latitude_fine: npt.NDArray,
     n_fine: int,
     half_win: int,
 ) -> typing.Dict[str, npt.NDArray]:
@@ -427,11 +435,11 @@ def _compute_3term_decomp_yearly(
     first_term_SH = np.zeros(n_months)
 
     for n in range(n_months):
-        flux_nh = _slice_mean(F_TE_cycl_int[n], centre=st_nh[n], half_win=half_win)
-        flux_sh = _slice_mean(F_TE_cycl_int[n], centre=st_sh[n], half_win=half_win)
+        flux_nh = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_nh[n], half_win=half_win)
+        flux_sh = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
         sh_idx = (n - 6) % n_months
-        first_term_NH[n] = flux_nh / (np.cos(np.deg2rad(lat_f[st_nh[n]])) * area_nh[n])
-        first_term_SH[n] = flux_sh / (np.cos(np.deg2rad(lat_f[st_sh[n]])) * area_sh[sh_idx])
+        first_term_NH[n] = flux_nh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_nh[n]])) * area_nh[n])
+        first_term_SH[n] = flux_sh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_sh[n]])) * area_sh[sh_idx])
 
     plot_2_nh = np.zeros(n_months)
     plot_2_sh = np.zeros(n_months)
@@ -441,22 +449,22 @@ def _compute_3term_decomp_yearly(
     plot_5_sh = np.zeros(n_months)
 
     for n in range(n_months):
-        flux_nh = _slice_mean(F_TE_cycl_int[n], centre=st_nh[n], half_win=half_win)
-        flux_sh = _slice_mean(F_TE_cycl_int[n], centre=st_sh[n], half_win=half_win)
+        flux_nh = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_nh[n], half_win=half_win)
+        flux_sh = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
         sh_idx = (n - 6) % n_months
 
-        plot_2_nh[n] = flux_nh / (np.cos(np.deg2rad(lat_f[st_nh[n]])) * np.mean(area_nh))
-        plot_2_sh[n] = flux_sh / (np.cos(np.deg2rad(lat_f[st_sh[n]])) * np.mean(area_sh))
-        plot_4_nh[n] = flux_nh / (np.cos(np.deg2rad(lat_f[st_nh[n]])) * area_nh[n])
-        plot_4_sh[n] = flux_sh / (np.cos(np.deg2rad(lat_f[st_sh[n]])) * area_sh[sh_idx])
+        plot_2_nh[n] = flux_nh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_nh[n]])) * np.mean(area_nh))
+        plot_2_sh[n] = flux_sh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_sh[n]])) * np.mean(area_sh))
+        plot_4_nh[n] = flux_nh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_nh[n]])) * area_nh[n])
+        plot_4_sh[n] = flux_sh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_sh[n]])) * area_sh[sh_idx])
         plot_5_nh[n] = (
             np.mean(first_term_NH)
-            * (np.cos(np.deg2rad(lat_f[st_nh[n]])) * area_nh[n])
+            * (np.cos(np.deg2rad(latitude_fine[stormtrack_index_nh[n]])) * area_nh[n])
             / np.mean(area_nh)
         )
         plot_5_sh[n] = (
             np.mean(first_term_SH)
-            * (np.cos(np.deg2rad(lat_f[st_sh[n]])) * area_sh[sh_idx])
+            * (np.cos(np.deg2rad(latitude_fine[stormtrack_index_sh[n]])) * area_sh[sh_idx])
             / np.mean(area_sh)
         )
 
@@ -475,10 +483,10 @@ def _compute_DI_yearly(
     flux_dict: typing.Dict[str, npt.NDArray],
     area_nh_scalar: float,
     area_sh_scalar: float,
-    st_nh: npt.NDArray,
-    st_sh: npt.NDArray,
-    stlat_nh: npt.NDArray,
-    stlat_sh: npt.NDArray,
+    stormtrack_index_nh: npt.NDArray,
+    stormtrack_index_sh: npt.NDArray,
+    stormtrack_latitude_nh: npt.NDArray,
+    stormtrack_latitude_sh: npt.NDArray,
     n_fine: int,
     half_win: int,
     intensity_idx: int,
@@ -525,12 +533,12 @@ def _compute_DI_yearly(
             )
 
         nh_raw = (
-            _mean_around_track(fld_int, idx=st_nh, half_win=half_win)
-            / norm_factor(stlat_nh, area_mean=area_nh_scalar)
+            _mean_around_track(fld_int, idx=stormtrack_index_nh, half_win=half_win)
+            / norm_factor(stormtrack_latitude_nh, area_mean=area_nh_scalar)
         )
         sh_raw = (
-            _mean_around_track(fld_int, idx=st_sh, half_win=half_win)
-            / norm_factor(stlat_sh, area_mean=area_sh_scalar)
+            _mean_around_track(fld_int, idx=stormtrack_index_sh, half_win=half_win)
+            / norm_factor(stormtrack_latitude_sh, area_mean=area_sh_scalar)
         )
 
         out["D_I_NH_%s%d" % (out_key, intensity_idx)] = nh_raw - np.mean(nh_raw)
@@ -549,8 +557,8 @@ def _compute_area_at_track_yearly(
     cycl_zon: npt.NDArray,
     *,
     ant_zon: npt.NDArray,
-    st_nh: npt.NDArray,
-    st_sh: npt.NDArray,
+    stormtrack_index_nh: npt.NDArray,
+    stormtrack_index_sh: npt.NDArray,
     n_fine: int,
     half_win: int,
 ) -> typing.Dict[str, npt.NDArray]:
@@ -561,15 +569,15 @@ def _compute_area_at_track_yearly(
         cyc_int = _interp_lat_2d(cycl_zon[cut_idx], n_fine=n_fine)
         ant_int = _interp_lat_2d(ant_zon[cut_idx], n_fine=n_fine)
 
-        nh_cyc = _mean_around_track(cyc_int, idx=st_nh, half_win=half_win)
+        nh_cyc = _mean_around_track(cyc_int, idx=stormtrack_index_nh, half_win=half_win)
         sh_cyc = np.zeros(n_months)
         for n in range(n_months):
-            sh_cyc[(n - 6) % n_months] = _slice_mean(cyc_int[n], centre=st_sh[n], half_win=half_win)
+            sh_cyc[(n - 6) % n_months] = _slice_mean(cyc_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
 
-        nh_ant = _mean_around_track(ant_int, idx=st_nh, half_win=half_win)
+        nh_ant = _mean_around_track(ant_int, idx=stormtrack_index_nh, half_win=half_win)
         sh_ant = np.zeros(n_months)
         for n in range(n_months):
-            sh_ant[(n - 6) % n_months] = _slice_mean(ant_int[n], centre=st_sh[n], half_win=half_win)
+            sh_ant[(n - 6) % n_months] = _slice_mean(ant_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
 
         cut_label = 1 if cut_idx == 0 else 6
         out["cycl_NH_%d" % cut_label] = nh_cyc
@@ -598,19 +606,17 @@ def compute_interannual_variability(
         year_start, year_end - 1,
     )
 
-    with netCDF4.Dataset(str(flux_file)) as ds:
-        latitude = np.asarray(ds["lat"][:])
-        if "lon" in ds.variables:
-            longitude = np.asarray(ds["lon"][:])
-        else:
-            n_lon = ds["F_TE_final"].shape[-1]
-            longitude = np.linspace(0, 360, n_lon, endpoint=False)
+    with netCDF4.Dataset(str(flux_file)) as dataset:
+        lat_key = gridded_data.resolve_dimension_name(dataset, standard_name="latitude")
+        lon_key = gridded_data.resolve_dimension_name(dataset, standard_name="longitude")
+        latitude = np.asarray(dataset[lat_key][:])
+        longitude = np.asarray(dataset[lon_key][:])
 
     n_lat = latitude.shape[0]
     n_lon = longitude.shape[0]
     n_fine = n_lat * fine_grid_factor
-    lat_fine = _fine_lat(latitude, n_fine=n_fine)
-    half_win = _half_win_from_lat(lat_fine, half_width_deg=track_half_width_deg)
+    latitude_fine = _fine_lat(latitude, n_fine=n_fine)
+    half_win = _half_win_from_lat(latitude_fine, half_width_deg=track_half_width_deg)
 
     _LOG.info(
         "Grid: n_lat=%d, n_lon=%d, n_fine=%d, half_win=%d (%.1f deg)",
@@ -665,15 +671,15 @@ def compute_interannual_variability(
 
         F_TE_total_zon = fluxes["F_TE_0"]
         F_TE_total_int = _interp_lat_2d(F_TE_total_zon, n_fine=n_fine)
-        st_nh, st_sh, stlat_nh, stlat_sh = _stormtrack_from_total_fte(
-            F_TE_total_int, lat_fine=lat_fine,
+        stormtrack_index_nh, stormtrack_index_sh, stormtrack_latitude_nh, stormtrack_latitude_sh = _stormtrack_from_total_fte(
+            F_TE_total_int, latitude_fine=latitude_fine,
         )
 
         area_at_track = _compute_area_at_track_yearly(
             cycl_zon,
             ant_zon=ant_zon,
-            st_nh=st_nh,
-            st_sh=st_sh,
+            stormtrack_index_nh=stormtrack_index_nh,
+            stormtrack_index_sh=stormtrack_index_sh,
             n_fine=n_fine,
             half_win=half_win,
         )
@@ -692,7 +698,8 @@ def compute_interannual_variability(
         decomp_weak = _compute_3term_decomp_yearly(
             F_TE_cycl_weak_zon,
             area_nh=area_weak_nh, area_sh=area_weak_sh,
-            st_nh=st_nh, st_sh=st_sh, lat_f=lat_fine,
+            stormtrack_index_nh=stormtrack_index_nh, stormtrack_index_sh=stormtrack_index_sh,
+            latitude_fine=latitude_fine,
             n_fine=n_fine, half_win=half_win,
         )
 
@@ -700,7 +707,8 @@ def compute_interannual_variability(
         decomp_strong = _compute_3term_decomp_yearly(
             F_TE_cycl_strong_zon,
             area_nh=area_strong_nh, area_sh=area_strong_sh,
-            st_nh=st_nh, st_sh=st_sh, lat_f=lat_fine,
+            stormtrack_index_nh=stormtrack_index_nh, stormtrack_index_sh=stormtrack_index_sh,
+            latitude_fine=latitude_fine,
             n_fine=n_fine, half_win=half_win,
         )
 
@@ -721,8 +729,8 @@ def compute_interannual_variability(
             flux_dict=fluxes,
             area_nh_scalar=area_weak_nh_mean,
             area_sh_scalar=area_weak_sh_mean,
-            st_nh=st_nh, st_sh=st_sh,
-            stlat_nh=stlat_nh, stlat_sh=stlat_sh,
+            stormtrack_index_nh=stormtrack_index_nh, stormtrack_index_sh=stormtrack_index_sh,
+            stormtrack_latitude_nh=stormtrack_latitude_nh, stormtrack_latitude_sh=stormtrack_latitude_sh,
             n_fine=n_fine, half_win=half_win,
             intensity_idx=0,
         )
@@ -731,8 +739,8 @@ def compute_interannual_variability(
             flux_dict=fluxes,
             area_nh_scalar=area_strong_nh_mean,
             area_sh_scalar=area_strong_sh_mean,
-            st_nh=st_nh, st_sh=st_sh,
-            stlat_nh=stlat_nh, stlat_sh=stlat_sh,
+            stormtrack_index_nh=stormtrack_index_nh, stormtrack_index_sh=stormtrack_index_sh,
+            stormtrack_latitude_nh=stormtrack_latitude_nh, stormtrack_latitude_sh=stormtrack_latitude_sh,
             n_fine=n_fine, half_win=half_win,
             intensity_idx=5,
         )
@@ -769,49 +777,79 @@ def compute_interannual_variability(
     _LOG.info("Saving to %s", output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with netCDF4.Dataset(str(output_path), "w", format="NETCDF4") as ds:
-        ds.createDimension("scalar", 1)
-        ds.createDimension("lines4", n_lines)
-        ds.createDimension("month", n_months)
-        ds.createDimension("panels4", n_lines)
+    with netCDF4.Dataset(str(output_path), "w", format="NETCDF4") as dataset:
+        dataset.createDimension("scalar", 1)
+        dataset.createDimension("lines4", n_lines)
+        dataset.createDimension("month", n_months)
+        dataset.createDimension("panels4", n_lines)
 
-        for name, val in [("fig1_band_a", fig1_band_a),
-                          ("fig1_band_b", fig1_band_b),
-                          ("fig1_band_c", fig1_band_c)]:
-            v = ds.createVariable(name, "f8", ("scalar",))
+        for name, val, long_name in [
+            ("fig1_band_a", fig1_band_a,
+             "interannual max std band for Figure 1 panel a (TE/area_mean)"),
+            ("fig1_band_b", fig1_band_b,
+             "interannual max std band for Figure 1 panel b (mean_IL * cos*area)"),
+            ("fig1_band_c", fig1_band_c,
+             "interannual max std band for Figure 1 panel c (TE/area)"),
+        ]:
+            v = dataset.createVariable(name, "f8", ("scalar",))
             v[:] = val
+            v.units = "PW"
+            v.long_name = long_name
 
-        for name, arr in [("fig1_std_per_line_a", fig1_std_a),
-                          ("fig1_std_per_line_b", fig1_std_b),
-                          ("fig1_std_per_line_c", fig1_std_c)]:
-            v = ds.createVariable(name, "f8", ("lines4",))
-            v[:] = arr
+        for name, per_line_std, long_name in [
+            ("fig1_std_per_line_a", fig1_std_a,
+             "per-line interannual std for Figure 1 panel a"),
+            ("fig1_std_per_line_b", fig1_std_b,
+             "per-line interannual std for Figure 1 panel b"),
+            ("fig1_std_per_line_c", fig1_std_c,
+             "per-line interannual std for Figure 1 panel c"),
+        ]:
+            v = dataset.createVariable(name, "f8", ("lines4",))
+            v[:] = per_line_std
             v.line_order = "weak_NH, weak_SH, strong_NH, strong_SH"
+            v.units = "PW"
+            v.long_name = long_name
 
-        for name, arr in [("fig1_std_month_a", fig1_std_per_month_a),
-                          ("fig1_std_month_b", fig1_std_per_month_b),
-                          ("fig1_std_month_c", fig1_std_per_month_c)]:
-            v = ds.createVariable(name, "f8", ("lines4", "month"))
-            v[:] = arr
+        for name, month_std, long_name in [
+            ("fig1_std_month_a", fig1_std_per_month_a,
+             "per-line per-month interannual std for Figure 1 panel a"),
+            ("fig1_std_month_b", fig1_std_per_month_b,
+             "per-line per-month interannual std for Figure 1 panel b"),
+            ("fig1_std_month_c", fig1_std_per_month_c,
+             "per-line per-month interannual std for Figure 1 panel c"),
+        ]:
+            v = dataset.createVariable(name, "f8", ("lines4", "month"))
+            v[:] = month_std
+            v.units = "PW"
+            v.long_name = long_name
 
-        v = ds.createVariable("fig2_band_area", "f8", ("scalar",))
+        v = dataset.createVariable("fig2_band_area", "f8", ("scalar",))
         v[:] = fig2_band_area
-        v = ds.createVariable("fig2_std_per_line_area", "f8", ("lines4",))
+        v.units = "%"
+        v.long_name = "interannual max std band for Figure 2 (cyclone area)"
+
+        v = dataset.createVariable("fig2_std_per_line_area", "f8", ("lines4",))
         v[:] = fig2_std_area
         v.line_order = "NH_1-5, SH_1-5, NH_6+, SH_6+"
+        v.units = "%"
+        v.long_name = "per-line interannual std for Figure 2 (cyclone area)"
 
-        v = ds.createVariable("fig4_bands", "f8", ("panels4",))
+        v = dataset.createVariable("fig4_bands", "f8", ("panels4",))
         v[:] = fig4_bands
         v.panel_order = "SH_weak, NH_weak, SH_strong, NH_strong"
+        v.units = "PW"
+        v.long_name = "interannual std of DJF-JJA seasonal difference for Figure 4"
 
-        v = ds.createVariable("fig5_bands", "f8", ("panels4",))
+        v = dataset.createVariable("fig5_bands", "f8", ("panels4",))
         v[:] = fig5_bands
         v.panel_order = "CA_land, CA_ocean, 6CVU_land, 6CVU_ocean"
+        v.units = "PW"
+        v.long_name = "interannual std for Figure 5 (land/ocean)"
 
-        ds.description = (
+        dataset.description = (
             "Interannual variability metrics for gray bands in Figures 1, 2, 4, 5. "
             "Computed as std across %d years (%d-%d). "
             "For multi-line panels, band = max(mean(std_per_month)) across lines."
         ) % (n_years, year_start, year_end - 1)
-        ds.year_start = year_start
-        ds.year_end = year_end
+        dataset.year_start = year_start
+        dataset.year_end = year_end

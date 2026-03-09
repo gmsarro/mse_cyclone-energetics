@@ -12,7 +12,7 @@ import cyclone_energetics.constants as constants
 _LOG = logging.getLogger(__name__)
 
 _NCL_SCRIPT: pathlib.Path = (
-    pathlib.Path(__file__).resolve().parent.parent / "ncl" / "hoskins_filter.ncl"
+    pathlib.Path(__file__).resolve().parent.parent.parent / "ncl" / "hoskins_filter.ncl"
 )
 
 
@@ -83,8 +83,8 @@ def hoskins_spectral_smooth(
 def _detect_vint_variable_names(
     vint_path: pathlib.Path,
 ) -> tuple[list[str], list[str]]:
-    with netCDF4.Dataset(str(vint_path)) as ds:
-        keys = list(ds.variables.keys())
+    with netCDF4.Dataset(str(vint_path)) as dataset:
+        keys = list(dataset.variables.keys())
 
     if "vigd" in keys:
         return (

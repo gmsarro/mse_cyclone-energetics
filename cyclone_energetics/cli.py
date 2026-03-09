@@ -7,19 +7,19 @@ import typing
 import typer
 import typing_extensions
 
-import cyclone_energetics.composites as composites
-import cyclone_energetics.condensed_composites as condensed_composites
+import cyclone_energetics.assignment.flux_assignment as flux_assignment
+import cyclone_energetics.composites.builder as composites
+import cyclone_energetics.composites.condensed as condensed_composites
+import cyclone_energetics.computation.advection as zonal_advection
+import cyclone_energetics.computation.flux as flux_computation
+import cyclone_energetics.computation.storage as storage_computation
 import cyclone_energetics.constants as constants
-import cyclone_energetics.flux_assignment as flux_assignment
-import cyclone_energetics.flux_computation as flux_computation
 import cyclone_energetics.gridded_data as gridded_data
-import cyclone_energetics.integration as integration
-import cyclone_energetics.masking as masking
-import cyclone_energetics.smoothing as smoothing
-import cyclone_energetics.storage_computation as storage_computation
-import cyclone_energetics.track_processing as track_processing
-import cyclone_energetics.variability as variability
-import cyclone_energetics.zonal_advection as zonal_advection
+import cyclone_energetics.integration.poleward as integration
+import cyclone_energetics.masking.masks as masking
+import cyclone_energetics.smoothing.hoskins as smoothing
+import cyclone_energetics.tracks.processing as track_processing
+import cyclone_energetics.variability.interannual as variability
 
 app = typer.Typer(help="Cyclone energetics processing pipeline.")
 

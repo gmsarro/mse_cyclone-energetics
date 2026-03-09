@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import typing
 
+import netCDF4
 import numpy as np
 import numpy.typing as npt
 import xarray
@@ -14,8 +15,33 @@ _DIM_ALIASES: typing.Dict[str, str] = {
     "lon": "longitude",
 }
 
+_CANONICAL_CANDIDATES: typing.Dict[str, typing.List[str]] = {
+    "time": ["time", "valid_time"],
+    "latitude": ["latitude", "lat"],
+    "longitude": ["longitude", "lon"],
+    "level": ["level", "pressure_level", "plev"],
+}
+
 _4D_ORDER: typing.Tuple[str, ...] = ("time", "level", "latitude", "longitude")
 _3D_ORDER: typing.Tuple[str, ...] = ("time", "latitude", "longitude")
+
+
+def resolve_dimension_name(
+    dataset: netCDF4.Dataset | xarray.Dataset,
+    *,
+    standard_name: str,
+) -> str:
+    candidates = _CANONICAL_CANDIDATES.get(standard_name, [standard_name])
+    if isinstance(dataset, xarray.Dataset):
+        pool = set(dataset.dims) | set(dataset.coords)
+    else:
+        pool = set(dataset.dimensions.keys()) | set(dataset.variables.keys())
+    for name in candidates:
+        if name in pool:
+            return name
+    raise KeyError(
+        "No dimension matching '%s' found; available: %s" % (standard_name, sorted(pool))
+    )
 
 
 def _normalise(ds: xarray.Dataset) -> xarray.Dataset:
@@ -152,3 +178,12 @@ def compute_beta_mask(
 
     beta = beta.where(p_above <= ps, 0.0)
     return beta
+
+
+def infer_time_step_seconds(
+    time_coord: xarray.DataArray,
+) -> float:
+    delta = time_coord.values[1] - time_coord.values[0]
+    if np.issubdtype(time_coord.dtype, np.datetime64):
+        return float(np.timedelta64(delta, "ns").astype(np.float64)) / 1e9
+    return float(delta) * 3600.0

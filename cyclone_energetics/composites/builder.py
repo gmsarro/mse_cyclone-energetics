@@ -13,6 +13,7 @@ import scipy.interpolate
 import xarray
 
 import cyclone_energetics.constants as constants
+import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
 
@@ -155,8 +156,8 @@ class _MonthlyData:
     def __init__(
         self,
         *,
-        yy: int,
-        mm: int,
+        year: int,
+        month: int,
         integrated_flux_directory: pathlib.Path,
         vint_directory: pathlib.Path,
         dhdt_directory: pathlib.Path,
@@ -166,9 +167,9 @@ class _MonthlyData:
         q_directory: pathlib.Path,
         vorticity_directory: typing.Optional[pathlib.Path],
     ) -> None:
-        self.yy = yy
-        self.mm = mm
-        self.nt = constants.NOLEAP_MONTH_LENGTHS[mm - 1] * 4
+        self.year = year
+        self.month = month
+        self.n_timesteps = constants.NOLEAP_MONTH_LENGTHS[month - 1] * 4
 
         self.pw1: typing.Dict[str, npt.NDArray] = {}
         self.pw2: typing.Dict[str, npt.NDArray] = {}
@@ -210,13 +211,13 @@ class _MonthlyData:
         scale: float = 1.0,
         pre_flip_lat: bool = False,
         post_reverse_lon: bool = False,
-        lat_key: str = "latitude",
-        lon_key: str = "longitude",
     ) -> typing.Optional[typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]]:
         if not path.exists():
             return None
         try:
             with netCDF4.Dataset(str(path)) as ds:
+                lat_key = gridded_data.resolve_dimension_name(ds, standard_name="latitude")
+                lon_key = gridded_data.resolve_dimension_name(ds, standard_name="longitude")
                 lat = np.asarray(ds[lat_key][:], dtype=np.float32)
                 lon = _to_360(np.asarray(ds[lon_key][:], dtype=np.float32))
                 lat, lon, lat_flip, lon_order = _sort_coords(lat=lat, lon=lon)
@@ -224,10 +225,10 @@ class _MonthlyData:
                     levels = np.asarray(ds["level"][:])
                     level_idx = int(np.argmin(np.abs(levels - pressure_hpa)))
                     arr = np.asarray(
-                        ds[var_name][:self.nt, level_idx, :, :], dtype=np.float32
+                        ds[var_name][:self.n_timesteps, level_idx, :, :], dtype=np.float32
                     )
                 else:
-                    arr = np.asarray(ds[var_name][:self.nt], dtype=np.float32)
+                    arr = np.asarray(ds[var_name][:self.n_timesteps], dtype=np.float32)
                 if scale != 1.0:
                     arr = arr * scale
                 if pre_flip_lat:
@@ -240,20 +241,20 @@ class _MonthlyData:
                 return arr, lat, lon
         except (OSError, KeyError) as exc:
             _LOG.debug(
-                "  Skipping %s for %d/%02d: %s", var_name, self.yy, self.mm, exc
+                "  Skipping %s for %d/%02d: %s", var_name, self.year, self.month, exc
             )
             return None
 
     def _load_pw(self) -> None:
         path1 = self._integrated_flux_directory / (
-            "Integrated_Fluxes_%d_%02d_.nc" % (self.yy, self.mm)
+            "Integrated_Fluxes_%d_%02d_.nc" % (self.year, self.month)
         )
         path2 = self._integrated_flux_directory / (
-            "New_Integrated_Fluxes_%d_%02d_.nc" % (self.yy, self.mm)
+            "New_Integrated_Fluxes_%d_%02d_.nc" % (self.year, self.month)
         )
 
         if not path1.exists() or not path2.exists():
-            _LOG.warning("  PW flux files missing for %d/%02d", self.yy, self.mm)
+            _LOG.warning("  PW flux files missing for %d/%02d", self.year, self.month)
             return
 
         with netCDF4.Dataset(str(path1)) as ds:
@@ -265,7 +266,7 @@ class _MonthlyData:
             for vname in ["F_TE_final", "tot_energy_final", "F_Shf_final",
                           "F_Swabs_final", "F_Olr_final"]:
                 if vname in ds.variables:
-                    arr = np.asarray(ds[vname][:self.nt], dtype=np.float32)
+                    arr = np.asarray(ds[vname][:self.n_timesteps], dtype=np.float32)
                     if lat_flip:
                         arr = arr[:, ::-1, :]
                     arr = arr[:, :, lon_order]
@@ -274,7 +275,7 @@ class _MonthlyData:
         with netCDF4.Dataset(str(path2)) as ds:
             for vname in ["F_u_mse_final", "F_v_mse_final", "F_Dhdt_final"]:
                 if vname in ds.variables:
-                    arr = np.asarray(ds[vname][:self.nt], dtype=np.float32)
+                    arr = np.asarray(ds[vname][:self.n_timesteps], dtype=np.float32)
                     if lat_flip:
                         arr = arr[:, ::-1, :]
                     arr = arr[:, :, lon_order]
@@ -286,18 +287,20 @@ class _MonthlyData:
         loaded: typing.List[str] = []
 
         vint_path = self._vint_directory / (
-            "era5_vint_%d_%02d_filtered.nc" % (self.yy, self.mm)
+            "era5_vint_%d_%02d_filtered.nc" % (self.year, self.month)
         )
         if vint_path.exists():
             try:
                 with netCDF4.Dataset(str(vint_path)) as ds:
-                    vn = _resolve_vint_names(ds=ds)
-                    lat = np.asarray(ds["latitude"][:], dtype=np.float32)
-                    lon = _to_360(np.asarray(ds["longitude"][:], dtype=np.float32))
+                    vint_names = _resolve_vint_names(ds=ds)
+                    lat_key = gridded_data.resolve_dimension_name(ds, standard_name="latitude")
+                    lon_key = gridded_data.resolve_dimension_name(ds, standard_name="longitude")
+                    lat = np.asarray(ds[lat_key][:], dtype=np.float32)
+                    lon = _to_360(np.asarray(ds[lon_key][:], dtype=np.float32))
 
-                    vigd = np.asarray(ds[vn["vigd"]][:self.nt], dtype=np.float32)
-                    vimdf = np.asarray(ds[vn["vimdf"]][:self.nt], dtype=np.float32)
-                    vithed = np.asarray(ds[vn["vithed"]][:self.nt], dtype=np.float32)
+                    vigd = np.asarray(ds[vint_names["vigd"]][:self.n_timesteps], dtype=np.float32)
+                    vimdf = np.asarray(ds[vint_names["vimdf"]][:self.n_timesteps], dtype=np.float32)
+                    vithed = np.asarray(ds[vint_names["vithed"]][:self.n_timesteps], dtype=np.float32)
 
                     vigd = vigd[:, ::-1, :]
                     vimdf = vimdf[:, ::-1, :]
@@ -320,11 +323,11 @@ class _MonthlyData:
                     self.energy_wm = vigd + vimdf * _LV + vithed
                     loaded.append("energy_wm")
             except (OSError, KeyError) as exc:
-                _LOG.debug("  Skipping energy_wm for %d/%02d: %s", self.yy, self.mm, exc)
+                _LOG.debug("  Skipping energy_wm for %d/%02d: %s", self.year, self.month, exc)
 
         result = self._load_sorted_field(
             path=self._dhdt_directory / (
-                "tend_%d_%02d_filtered_2.nc" % (self.yy, self.mm)
+                "tend_%d_%02d_filtered_2.nc" % (self.year, self.month)
             ),
             var_name="tend_filtered",
             pre_flip_lat=True,
@@ -338,18 +341,20 @@ class _MonthlyData:
             loaded.append("dhdt_wm")
 
         rad_path = self._radiation_directory / (
-            "era5_rad_%d_%02d.6hrly.nc" % (self.yy, self.mm)
+            "era5_rad_%d_%02d.6hrly.nc" % (self.year, self.month)
         )
         if rad_path.exists():
             try:
                 with netCDF4.Dataset(str(rad_path)) as ds:
-                    time_var = "valid_time" if "valid_time" in ds.variables else "time"
-                    nt_rad = min(self.nt, ds[time_var].shape[0])
+                    time_key = gridded_data.resolve_dimension_name(ds, standard_name="time")
+                    lat_key = gridded_data.resolve_dimension_name(ds, standard_name="latitude")
+                    lon_key = gridded_data.resolve_dimension_name(ds, standard_name="longitude")
+                    nt_rad = min(self.n_timesteps, ds[time_key].shape[0])
                     tsr = np.asarray(ds["tsr"][:nt_rad], dtype=np.float32)
                     ssr = np.asarray(ds["ssr"][:nt_rad], dtype=np.float32)
                     ttr = np.asarray(ds["ttr"][:nt_rad], dtype=np.float32)
-                    lat = np.asarray(ds["latitude"][:], dtype=np.float32)
-                    lon = _to_360(np.asarray(ds["longitude"][:], dtype=np.float32))
+                    lat = np.asarray(ds[lat_key][:], dtype=np.float32)
+                    lon = _to_360(np.asarray(ds[lon_key][:], dtype=np.float32))
                     lat, lon, lat_flip, lon_order = _sort_coords(lat=lat, lon=lon)
                     if lat_flip:
                         tsr = tsr[:, ::-1, :]
@@ -362,11 +367,11 @@ class _MonthlyData:
                     self.olr_wm = np.nan_to_num(ttr / 3600.0, nan=0.0)
                     loaded.append("swabs+olr")
             except OSError as exc:
-                _LOG.debug("  Skipping radiation for %d/%02d: %s", self.yy, self.mm, exc)
+                _LOG.debug("  Skipping radiation for %d/%02d: %s", self.year, self.month, exc)
 
         result = self._load_sorted_field(
             path=self._z_directory / (
-                "era5_z_%d_%02d.6hrly.nc" % (self.yy, self.mm)
+                "era5_z_%d_%02d.6hrly.nc" % (self.year, self.month)
             ),
             var_name="z",
             pressure_hpa=_GEOPOTENTIAL_PRESSURE_HPA,
@@ -381,7 +386,7 @@ class _MonthlyData:
 
         result = self._load_sorted_field(
             path=self._t2m_directory / (
-                "era5_t2m_%d_%02d.6hrly.nc" % (self.yy, self.mm)
+                "era5_t2m_%d_%02d.6hrly.nc" % (self.year, self.month)
             ),
             var_name="t2m",
         )
@@ -391,7 +396,7 @@ class _MonthlyData:
 
         result = self._load_sorted_field(
             path=self._q_directory / (
-                "era5_q_%d_%02d.6hrly.nc" % (self.yy, self.mm)
+                "era5_q_%d_%02d.6hrly.nc" % (self.year, self.month)
             ),
             var_name="q",
             pressure_hpa=_Q_PRESSURE_HPA,
@@ -402,7 +407,7 @@ class _MonthlyData:
 
         if self._vorticity_directory is not None:
             vo_path = self._vorticity_directory / (
-                "VO850_%d.nc" % self.yy
+                "VO850_%d.nc" % self.year
             )
             if vo_path.exists():
                 try:
@@ -415,8 +420,8 @@ class _MonthlyData:
                             self.vo_lat = self.vo_lat[::-1]
                         vo_lon_order = np.argsort(self.vo_lon)
                         self.vo_lon = self.vo_lon[vo_lon_order]
-                        month_start = constants.NOLEAP_MONTH_CUMULATIVE[self.mm - 1] * 4
-                        month_end = month_start + self.nt
+                        month_start = constants.NOLEAP_MONTH_CUMULATIVE[self.month - 1] * 4
+                        month_end = month_start + self.n_timesteps
                         arr = np.asarray(
                             ds["VO"][month_start:month_end], dtype=np.float32
                         )
@@ -426,7 +431,7 @@ class _MonthlyData:
                         self.vo = arr
                         loaded.append("VO")
                 except OSError as exc:
-                    _LOG.debug("  Skipping VO for %d/%02d: %s", self.yy, self.mm, exc)
+                    _LOG.debug("  Skipping VO for %d/%02d: %s", self.year, self.month, exc)
 
         _LOG.info("    W/m2 loaded [%s]", ", ".join(loaded) if loaded else "none")
 
@@ -557,8 +562,8 @@ def build_cyclone_composites(
         )
 
         mdata = _MonthlyData(
-            yy=yy,
-            mm=mm,
+            year=yy,
+            month=mm,
             integrated_flux_directory=integrated_flux_directory,
             vint_directory=vint_directory,
             dhdt_directory=dhdt_directory,
@@ -572,7 +577,7 @@ def build_cyclone_composites(
         for si in snap_indices:
             lat0 = float(lat_arr[si])
             lon0 = float(lon_arr[si])
-            lt = int(local_t_arr[si])
+            time_index = int(local_t_arr[si])
 
             pw_ok = False
             row_center = {"%s_center" % nm: np.nan for nm in _PW_FIELD_MAP}
@@ -581,10 +586,10 @@ def build_cyclone_composites(
                 if var_name not in src:
                     continue
                 arr3d = src[var_name]
-                if lt >= arr3d.shape[0]:
+                if time_index >= arr3d.shape[0]:
                     continue
                 patch = _extract_patch_np(
-                    arr2d=arr3d[lt],
+                    arr2d=arr3d[time_index],
                     lat_vals=mdata.pw_lat,
                     lon_vals=mdata.pw_lon,
                     lat0=lat0,
@@ -611,9 +616,9 @@ def build_cyclone_composites(
             wm2_patches: typing.Dict[str, npt.NDArray] = {}
             for comp_key, attr_name in _WM2_EXTRACT_FIELDS:
                 source: typing.Optional[npt.NDArray] = getattr(mdata, attr_name)
-                if source is not None and lt < source.shape[0]:
+                if source is not None and time_index < source.shape[0]:
                     patch = _extract_patch_np(
-                        arr2d=source[lt],
+                        arr2d=source[time_index],
                         lat_vals=mdata.wm_lat,
                         lon_vals=mdata.wm_lon,
                         lat0=lat0,
@@ -624,16 +629,15 @@ def build_cyclone_composites(
                     wm2_comps[comp_key][midx] += patch
                     wm2_patches[comp_key] = patch
 
-            # SHF = column_MSE - Swabs - OLR + dh/dt
             if all(k in wm2_patches for k in ("energy_wm", "Swabs_wm", "Olr_wm", "Dhdt_wm")):
                 wm2_comps["Shf_wm"][midx] += (
                     wm2_patches["energy_wm"] - wm2_patches["Swabs_wm"]
                     - wm2_patches["Olr_wm"] + wm2_patches["Dhdt_wm"]
                 )
 
-            if mdata.vo is not None and lt < mdata.vo.shape[0]:
+            if mdata.vo is not None and time_index < mdata.vo.shape[0]:
                 wm2_comps["VO"][midx] += _extract_patch_np(
-                    arr2d=mdata.vo[lt],
+                    arr2d=mdata.vo[time_index],
                     lat_vals=mdata.vo_lat,
                     lon_vals=mdata.vo_lon,
                     lat0=lat0,
