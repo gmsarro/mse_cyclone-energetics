@@ -266,7 +266,7 @@ def _merge_hemispheres(
     lat_sh, field_sh = _sort_to_ascending(lat_sh, field=field_sh)
     lat_nh, field_nh = _sort_to_ascending(lat_nh, field=field_nh)
 
-    tol = 0.5 * float(np.abs(np.diff(lat_sh[:2])))
+    tol = 0.5 * float(np.abs(lat_sh[1] - lat_sh[0]))
 
     overlap_mask = np.array([
         np.any(np.abs(lat_nh - lat_val) < tol) for lat_val in lat_sh
