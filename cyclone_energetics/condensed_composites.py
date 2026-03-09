@@ -8,7 +8,7 @@ import netCDF4
 import numpy as np
 import numpy.typing as npt
 import scipy.interpolate
-import xarray as xr
+import xarray
 
 import cyclone_energetics.constants as constants
 
@@ -102,92 +102,85 @@ def create_condensed_composites(
     output_path: pathlib.Path,
     compress_level: int = 4,
 ) -> None:
-    """Create condensed monthly composites from unified composite files.
-
-    The new unified composite format includes both PW and W/m² fields
-    in the same file, so intense_full_path and all_full_path can optionally
-    be set to None if the unified files are used.
-    """
     max_te_sh_position = _compute_stormtrack_position(
         stormtrack_nc=stormtrack_path
     )
 
-    ds_int = xr.open_dataset(str(intense_composite_path))
-    ds_wk = xr.open_dataset(str(regular_composite_path))
+    with xarray.open_dataset(str(intense_composite_path)) as ds_int, \
+         xarray.open_dataset(str(regular_composite_path)) as ds_wk:
+        te_int_pw = ds_int["composite_TE"].values
+        shf_int_pw = ds_int["composite_Shf"].values
+        cnt_int_track = ds_int["count"].values.astype(float)
+        x_int = ds_int["x"].values
+        y_int = ds_int["y"].values
 
-    te_int_pw = ds_int["composite_TE"].values
-    shf_int_pw = ds_int["composite_Shf"].values
-    cnt_int_track = ds_int["count"].values.astype(float)
-    x_int = ds_int["x"].values
-    y_int = ds_int["y"].values
+        te_wk_pw = ds_wk["composite_TE"].values
+        shf_wk_pw = ds_wk["composite_Shf"].values
+        cnt_wk_track = ds_wk["count"].values.astype(float)
 
-    te_wk_pw = ds_wk["composite_TE"].values
-    shf_wk_pw = ds_wk["composite_Shf"].values
-    cnt_wk_track = ds_wk["count"].values.astype(float)
+        if "composite_Z" in ds_int and "composite_Shf_wm" in ds_int:
+            z_int = ds_int["composite_Z"].values
+            vo_int = ds_int["composite_VO"].values
+            shf_int = ds_int["composite_Shf_wm"].values
+            t_int = ds_int["composite_T"].values
+            q_int = ds_int["composite_Q"].values
+            n_int_full = cnt_int_track
 
-    if "composite_Z" in ds_int and "composite_Shf_wm" in ds_int:
-        z_int = ds_int["composite_Z"].values
-        vo_int = ds_int["composite_VO"].values
-        shf_int = ds_int["composite_Shf_wm"].values
-        t_int = ds_int["composite_T"].values
-        q_int = ds_int["composite_Q"].values
-        n_int_full = cnt_int_track
+            z_wk = ds_wk["composite_Z"].values
+            vo_wk = ds_wk["composite_VO"].values
+            shf_wk = ds_wk["composite_Shf_wm"].values
+            t_wk = ds_wk["composite_T"].values
+            q_wk = ds_wk["composite_Q"].values
+            n_wk_full = cnt_wk_track
+            n_all_full = cnt_int_track + cnt_wk_track
 
-        z_wk = ds_wk["composite_Z"].values
-        vo_wk = ds_wk["composite_VO"].values
-        shf_wk = ds_wk["composite_Shf_wm"].values
-        t_wk = ds_wk["composite_T"].values
-        q_wk = ds_wk["composite_Q"].values
-        n_wk_full = cnt_wk_track
-        n_all_full = cnt_int_track + cnt_wk_track
+            lat_ref = y_int
+            lon_ref = x_int
+        elif intense_full_path is not None and all_full_path is not None:
+            with netCDF4.Dataset(str(all_full_path)) as dsa:
+                lat_ref = dsa["lat"][:]
+                lon_ref = dsa["lon"][:]
+                z_all = _read_monthly_3d(dataset=dsa, name="composite_Z")
+                vo_all = _read_monthly_3d(dataset=dsa, name="composite_VO")
+                shf_all = _read_monthly_3d(dataset=dsa, name="composite_Shf")
+                t_all = _read_monthly_3d(dataset=dsa, name="composite_T")
+                q_all = _read_monthly_3d(dataset=dsa, name="composite_Q")
+                n_all_full = _read_count_12(dataset=dsa)
 
-        lat_ref = y_int
-        lon_ref = x_int
-    elif intense_full_path is not None and all_full_path is not None:
-        with netCDF4.Dataset(str(all_full_path)) as dsa:
-            lat_ref = dsa["lat"][:]
-            lon_ref = dsa["lon"][:]
-            z_all = _read_monthly_3d(dataset=dsa, name="composite_Z")
-            vo_all = _read_monthly_3d(dataset=dsa, name="composite_VO")
-            shf_all = _read_monthly_3d(dataset=dsa, name="composite_Shf")
-            t_all = _read_monthly_3d(dataset=dsa, name="composite_T")
-            q_all = _read_monthly_3d(dataset=dsa, name="composite_Q")
-            n_all_full = _read_count_12(dataset=dsa)
+            with netCDF4.Dataset(str(intense_full_path)) as dsi:
+                z_int = _read_monthly_3d(dataset=dsi, name="composite_Z")
+                vo_int = _read_monthly_3d(dataset=dsi, name="composite_VO")
+                shf_int = _read_monthly_3d(dataset=dsi, name="composite_Shf")
+                t_int = _read_monthly_3d(dataset=dsi, name="composite_T")
+                q_int = _read_monthly_3d(dataset=dsi, name="composite_Q")
+                n_int_full = _read_count_12(dataset=dsi)
 
-        with netCDF4.Dataset(str(intense_full_path)) as dsi:
-            z_int = _read_monthly_3d(dataset=dsi, name="composite_Z")
-            vo_int = _read_monthly_3d(dataset=dsi, name="composite_VO")
-            shf_int = _read_monthly_3d(dataset=dsi, name="composite_Shf")
-            t_int = _read_monthly_3d(dataset=dsi, name="composite_T")
-            q_int = _read_monthly_3d(dataset=dsi, name="composite_Q")
-            n_int_full = _read_count_12(dataset=dsi)
-
-        n_wk_full = n_all_full - n_int_full
-        z_wk = (
-            z_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
-            - z_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
-        )
-        vo_wk = (
-            vo_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
-            - vo_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
-        )
-        shf_wk = (
-            shf_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
-            - shf_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
-        )
-        t_wk = (
-            t_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
-            - t_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
-        )
-        q_wk = (
-            q_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
-            - q_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
-        )
-    else:
-        raise ValueError(
-            "Either unified files with W/m² fields or separate "
-            "intense_full_path and all_full_path required"
-        )
+            n_wk_full = n_all_full - n_int_full
+            z_wk = (
+                z_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
+                - z_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
+            )
+            vo_wk = (
+                vo_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
+                - vo_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
+            )
+            shf_wk = (
+                shf_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
+                - shf_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
+            )
+            t_wk = (
+                t_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
+                - t_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
+            )
+            q_wk = (
+                q_all * (n_all_full[:, None, None] / n_wk_full[:, None, None])
+                - q_int * (n_int_full[:, None, None] / n_wk_full[:, None, None])
+            )
+        else:
+            raise ValueError(
+                "Either unified files with W/m² fields or separate "
+                "intense_full_path and all_full_path required"
+            )
 
     wgt = _build_weight_cube(
         lat_row_base=y_int, max_position_12=max_te_sh_position, nx=te_int_pw.shape[-1]
@@ -215,7 +208,7 @@ def create_condensed_composites(
     category_names = np.array(["intense", "weak"], dtype=object)
     month_names = np.array(constants.MONTH_NAMES, dtype=object)
 
-    ds_out = xr.Dataset(
+    ds_out = xarray.Dataset(
         data_vars={
             "I_L": (
                 ("category", "month", "y", "x"),
@@ -284,7 +277,7 @@ def create_condensed_composites(
     )
 
     comp = {"zlib": True, "complevel": compress_level}
-    encoding = {}
+    encoding: typing.Dict[str, typing.Dict[str, typing.Any]] = {}
     for v in ds_out.data_vars:
         if ds_out[v].dtype.kind in ("f", "i"):
             encoding[v] = {**comp}
@@ -292,9 +285,5 @@ def create_condensed_composites(
     ds_out.to_netcdf(
         str(output_path), engine="netcdf4", format="NETCDF4", encoding=encoding
     )
-
-    ds_int.close()
-    ds_wk.close()
-    ds_out.close()
 
     _LOG.info("Wrote condensed file: %s", output_path)

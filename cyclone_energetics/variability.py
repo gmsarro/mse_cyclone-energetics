@@ -1,18 +1,5 @@
 from __future__ import annotations
 
-"""Interannual variability computation for confidence bands.
-
-Processes per-year flux and mask data to compute the standard deviation
-across years.  This module produces the gray confidence bands shown in
-the final figures.
-
-The workflow:
-  1. For each year, load per-year fluxes and area fractions from mask files.
-  2. Run the decomposition pipeline (3-term decomposition, DI, land/ocean).
-  3. Compute std across years for each panel.
-  4. Save results to a NetCDF file for use in plotting notebooks.
-"""
-
 import logging
 import pathlib
 import typing
@@ -27,50 +14,37 @@ import cyclone_energetics.constants as constants
 _LOG = logging.getLogger(__name__)
 
 _FINE_GRID_FACTOR: int = 36
-"""Refinement factor for latitude interpolation (n_fine = n_lat * factor)."""
 
 _TRACK_HALF_WIDTH_DEG: float = 10.0
-"""Half-width (degrees latitude) of the storm-track averaging band."""
 
 _PW_FACTOR: float = 2 * np.pi * constants.EARTH_RADIUS / 1e15
 
 _SMOOTH_WINDOW: int = 3
 
-# NH continental boundaries used for land/ocean decomposition.
-# Each entry is (lat_south, lat_north, lon_west, lon_east) in degrees.
-# Regions are set to *land* (= 1), then the ocean mask is the complement.
-# Latitude convention: positive = NH, negative = SH.
-# Longitude convention: 0-360°E.
 _LAND_REGIONS: typing.List[typing.Tuple[float, float, float, float]] = [
-    (32.5, 90.0, 0.0, 112.5),      # Broad Americas / W-Atlantic blanking
-    (57.5, 90.0, 112.5, 337.5),     # High-latitude Eurasia / Arctic
-    (32.5, 57.5, 112.5, 137.5),     # Central European extension
-    (42.5, 57.5, 112.5, 122.5),     # narrow European spur
-    (32.5, 47.5, 122.5, 137.5),     # maritime-continent patch
-    (37.5, 62.5, 237.5, 285.0),     # SE-Asian landmass strip
-    (47.5, 87.5, 237.5, 300.0),     # broader SE-Asia
+    (32.5, 90.0, 0.0, 112.5),
+    (57.5, 90.0, 112.5, 337.5),
+    (32.5, 57.5, 112.5, 137.5),
+    (42.5, 57.5, 112.5, 122.5),
+    (32.5, 47.5, 122.5, 137.5),
+    (37.5, 62.5, 237.5, 285.0),
+    (47.5, 87.5, 237.5, 300.0),
 ]
-# Oceanic overrides: sub-regions forced back to *ocean* (= 1).
 _OCEAN_OVERRIDES: typing.List[typing.Tuple[float, float, float, float]] = [
-    (80.0, 90.0, 0.0, 360.0),      # Arctic ocean cap
-    (70.0, 90.0, 55.0, 95.0),       # Greenland-Iceland gap
-    (50.0, 67.5, 122.5, 137.5),     # N-Pacific re-opening
-    (45.0, 52.5, 0.0, 22.5),        # W-Atlantic re-opening
+    (80.0, 90.0, 0.0, 360.0),
+    (70.0, 90.0, 55.0, 95.0),
+    (50.0, 67.5, 122.5, 137.5),
+    (45.0, 52.5, 0.0, 22.5),
 ]
-# The mask is only applied in the NH extratropics.
 _MASK_LAT_SOUTH: float = 0.0
 _MASK_LAT_NORTH: float = 57.5
 
 
-# ---------------------------------------------------------------------------
-# Interpolation
-# ---------------------------------------------------------------------------
 def _interp_lat_2d(
     field: npt.NDArray,
     *,
     n_fine: int,
 ) -> npt.NDArray:
-    """Interpolate a (n_months, n_lat) field to (n_months, n_fine)."""
     n_months, n_lat = field.shape
     x_d = np.linspace(0, n_lat - 1, n_lat)
     y_d = np.linspace(0, n_months, n_months)
@@ -85,7 +59,6 @@ def _fine_lat(
     *,
     n_fine: int,
 ) -> npt.NDArray:
-    """Interpolate latitude array to fine grid."""
     n_lat = latitude.shape[0]
     x_d = np.linspace(0, n_lat - 1, n_lat)
     x_fine = np.linspace(0, n_lat - 1, n_fine)
@@ -97,7 +70,6 @@ def _half_win_from_lat(
     *,
     half_width_deg: float = _TRACK_HALF_WIDTH_DEG,
 ) -> int:
-    """Convert a physical half-width in degrees to fine-grid index count."""
     dlat = float(np.abs(lat_fine[1] - lat_fine[0]))
     return max(1, int(round(half_width_deg / dlat)))
 
@@ -107,7 +79,6 @@ def _interp_mask_field(
     *,
     target_shape: typing.Tuple[int, int],
 ) -> npt.NDArray:
-    """Interpolate a 2-D mask field to target shape using bilinear."""
     in_ny, in_nx = field.shape
     out_ny, out_nx = target_shape
     y_in = np.linspace(0, in_ny - 1, in_ny)
@@ -118,14 +89,11 @@ def _interp_mask_field(
     return spline(y_out, x_out)
 
 
-# ---------------------------------------------------------------------------
-# Storm-track and averaging
-# ---------------------------------------------------------------------------
 def _stormtrack_from_total_fte(
     fte_zon_int: npt.NDArray,
+    *,
     lat_fine: npt.NDArray,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
-    """Find storm-track indices from TE flux maxima/minima."""
     st_nh = np.argmax(fte_zon_int, axis=1)
     st_sh = np.argmin(fte_zon_int, axis=1)
     return st_nh, st_sh, lat_fine[st_nh], lat_fine[st_sh]
@@ -133,11 +101,10 @@ def _stormtrack_from_total_fte(
 
 def _mean_around_track(
     field: npt.NDArray,
-    idx: npt.NDArray,
     *,
+    idx: npt.NDArray,
     half_win: int,
 ) -> npt.NDArray:
-    """Compute mean around storm-track latitude for each month."""
     n_months = field.shape[0]
     n_fine = field.shape[1]
     out = np.zeros(n_months)
@@ -153,13 +120,11 @@ def _running_mean(
     *,
     window_size: int = _SMOOTH_WINDOW,
 ) -> npt.NDArray:
-    """Apply running mean filter."""
     kernel = np.ones(window_size) / window_size
     return np.convolve(data, kernel, mode="same")
 
 
 def _seasonal_diff(x: npt.NDArray) -> float:
-    """Compute DJF minus JJA seasonal difference."""
     x = np.asarray(x)
     djf_idx = [11, 0, 1]
     jja_idx = [5, 6, 7]
@@ -169,21 +134,16 @@ def _seasonal_diff(x: npt.NDArray) -> float:
 def _band_from_lines(
     arr: npt.NDArray,
 ) -> typing.Tuple[float, npt.NDArray, npt.NDArray]:
-    """Compute variability band from multi-line array.
-
-    For shape (n_years, n_lines, n_months): std across years per month,
-    mean over months -> scalar.  Returns max across lines.
-    """
     std_per_month = np.std(arr, axis=0)
     mean_std = np.mean(std_per_month, axis=1)
     return float(np.max(mean_std)), mean_std, std_per_month
 
 
-# ---------------------------------------------------------------------------
-# Land / ocean masks (coordinate-based)
-# ---------------------------------------------------------------------------
-def _nearest_idx(arr: npt.NDArray, val: float) -> int:
-    """Index of the element in *arr* closest to *val*."""
+def _nearest_idx(
+    arr: npt.NDArray,
+    *,
+    val: float,
+) -> int:
     return int(np.argmin(np.abs(arr - val)))
 
 
@@ -192,43 +152,36 @@ def _build_land_ocean_masks(
     latitude: npt.NDArray,
     longitude: npt.NDArray,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
-    """Build ocean and land masks from lat/lon coordinate arrays.
-
-    All boundaries are defined in physical coordinates so the result is
-    independent of the grid resolution.
-    """
     n_lat = latitude.shape[0]
     n_lon = longitude.shape[0]
     lon360 = longitude % 360
 
-    lat_s_idx = _nearest_idx(latitude, _MASK_LAT_SOUTH)
-    lat_n_idx = _nearest_idx(latitude, _MASK_LAT_NORTH)
+    lat_s_idx = _nearest_idx(latitude, val=_MASK_LAT_SOUTH)
+    lat_n_idx = _nearest_idx(latitude, val=_MASK_LAT_NORTH)
     lat_lo = min(lat_s_idx, lat_n_idx)
     lat_hi = max(lat_s_idx, lat_n_idx) + 1
 
     land_mask = np.zeros((n_lat, n_lon))
 
     for (lat_south, lat_north, lon_west, lon_east) in _LAND_REGIONS:
-        i_s = _nearest_idx(latitude, lat_south)
-        i_n = _nearest_idx(latitude, lat_north)
-        j_w = _nearest_idx(lon360, lon_west)
-        j_e = _nearest_idx(lon360, lon_east)
+        i_s = _nearest_idx(latitude, val=lat_south)
+        i_n = _nearest_idx(latitude, val=lat_north)
+        j_w = _nearest_idx(lon360, val=lon_west)
+        j_e = _nearest_idx(lon360, val=lon_east)
         r_lo, r_hi = min(i_s, i_n), max(i_s, i_n) + 1
         c_lo, c_hi = min(j_w, j_e), max(j_w, j_e) + 1
         land_mask[r_lo:r_hi, c_lo:c_hi] = 1.0
 
     for (lat_south, lat_north, lon_west, lon_east) in _OCEAN_OVERRIDES:
-        i_s = _nearest_idx(latitude, lat_south)
-        i_n = _nearest_idx(latitude, lat_north)
-        j_w = _nearest_idx(lon360, lon_west)
-        j_e = _nearest_idx(lon360, lon_east)
+        i_s = _nearest_idx(latitude, val=lat_south)
+        i_n = _nearest_idx(latitude, val=lat_north)
+        j_w = _nearest_idx(lon360, val=lon_west)
+        j_e = _nearest_idx(lon360, val=lon_east)
         r_lo, r_hi = min(i_s, i_n), max(i_s, i_n) + 1
         c_lo, c_hi = min(j_w, j_e), max(j_w, j_e) + 1
         land_mask[r_lo:r_hi, c_lo:c_hi] = 0.0
 
-    # Zero out everything outside the [MASK_LAT_SOUTH, MASK_LAT_NORTH] band
     if latitude[0] > latitude[-1]:
-        # N -> S ordering
         land_mask[:lat_lo, :] = 0.0
         land_mask[lat_hi:, :] = 0.0
     else:
@@ -236,7 +189,6 @@ def _build_land_ocean_masks(
         land_mask[lat_hi:, :] = 0.0
 
     ocean_mask = 1.0 - land_mask
-    # Also zero the ocean mask outside the NH extratropical band
     if latitude[0] > latitude[-1]:
         ocean_mask[:lat_lo, :] = 0.0
         ocean_mask[lat_hi:, :] = 0.0
@@ -247,49 +199,46 @@ def _build_land_ocean_masks(
     return ocean_mask, land_mask
 
 
-# ---------------------------------------------------------------------------
-# Yearly data loaders
-# ---------------------------------------------------------------------------
 def _load_yearly_fluxes(
     *,
     yearly_files: typing.List[pathlib.Path],
     year_idx: int,
     years_per_file: int,
 ) -> typing.Dict[str, npt.NDArray]:
-    """Load per-year fluxes for intensity indices 0 and 5."""
     stage = year_idx // years_per_file
     yr_in_file = year_idx % years_per_file
 
     if stage >= len(yearly_files):
         raise IndexError(
-            f"Year index {year_idx} requires file index {stage}, "
-            f"but only {len(yearly_files)} files available"
+            "Year index %d requires file index %d, "
+            "but only %d files available"
+            % (year_idx, stage, len(yearly_files))
         )
 
     result: typing.Dict[str, npt.NDArray] = {}
     with netCDF4.Dataset(str(yearly_files[stage])) as ds:
         for icut in (0, 5):
             for suffix in ("", "_cycl", "_ant"):
-                vn_te = f"F_TE_final{suffix}"
+                vn_te = "F_TE_final%s" % suffix
                 if vn_te in ds.variables:
                     arr = ds[vn_te][icut, :, yr_in_file, :, :]
-                    result[f"F_TE{suffix}_{icut}"] = np.mean(arr, axis=-1)
+                    result["F_TE%s_%d" % (suffix, icut)] = np.mean(arr, axis=-1)
 
                 for vn_base in ("F_Swabs_final", "F_Olr_final", "F_Dhdt_final",
                                 "tot_energy_final", "F_TE_z_final", "F_UM_z_final"):
-                    vn = f"{vn_base}{suffix}"
+                    vn = "%s%s" % (vn_base, suffix)
                     if vn in ds.variables:
                         arr = ds[vn][icut, :, yr_in_file, :, :]
-                        key = f"{vn_base.replace('_final', '')}{suffix}_{icut}"
+                        key = "%s%s_%d" % (vn_base.replace("_final", ""), suffix, icut)
                         result[key] = np.mean(arr, axis=-1)
 
             for suffix in ("_cycl", "_ant"):
                 for vn_base in ("F_TE_final", "F_Swabs_final", "F_Olr_final",
                                 "F_Dhdt_final", "tot_energy_final",
                                 "F_TE_z_final", "F_UM_z_final"):
-                    vn = f"{vn_base}{suffix}"
+                    vn = "%s%s" % (vn_base, suffix)
                     if vn in ds.variables:
-                        key = f"2d_{vn_base.replace('_final', '')}{suffix}_{icut}"
+                        key = "2d_%s%s_%d" % (vn_base.replace("_final", ""), suffix, icut)
                         result[key] = np.asarray(ds[vn][icut, :, yr_in_file, :, :])
 
     return result
@@ -297,13 +246,9 @@ def _load_yearly_fluxes(
 
 def _sort_to_ascending(
     lat: npt.NDArray,
+    *,
     field: npt.NDArray,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
-    """Sort lat (and the corresponding lat-axis of field) to ascending.
-
-    Follows the same defensive pattern as composites._sort_coords:
-    never trust file metadata ordering — compare actual lat values.
-    """
     if lat.size > 1 and lat[0] > lat[-1]:
         lat = lat[::-1]
         field = field[::-1, :]
@@ -312,37 +257,26 @@ def _sort_to_ascending(
 
 def _merge_hemispheres(
     field_sh: npt.NDArray,
-    field_nh: npt.NDArray,
     *,
+    field_nh: npt.NDArray,
     lat_sh: npt.NDArray,
     lat_nh: npt.NDArray,
     target_lat: npt.NDArray,
 ) -> npt.NDArray:
-    """Concatenate SH and NH mask fields, removing duplicate equator rows
-    and ordering to match the target latitude array.
-
-    Both hemisphere arrays are first sorted to ascending latitude (S -> N)
-    using the actual lat values — not the file ordering — to guard against
-    inconsistent metadata.  Then overlapping equator rows are detected and
-    removed before concatenation.
-    """
-    lat_sh, field_sh = _sort_to_ascending(lat_sh, field_sh)
-    lat_nh, field_nh = _sort_to_ascending(lat_nh, field_nh)
+    lat_sh, field_sh = _sort_to_ascending(lat_sh, field=field_sh)
+    lat_nh, field_nh = _sort_to_ascending(lat_nh, field=field_nh)
 
     tol = 0.5 * float(np.abs(np.diff(lat_sh[:2])))
 
-    # Remove SH rows whose latitude already appears in the NH array
     overlap_mask = np.array([
         np.any(np.abs(lat_nh - lat_val) < tol) for lat_val in lat_sh
     ])
     field_sh_trimmed = field_sh[~overlap_mask, :]
     lat_sh_trimmed = lat_sh[~overlap_mask]
 
-    # Ascending: SH (negative lats) then NH (positive lats)
     combined_field = np.concatenate([field_sh_trimmed, field_nh], axis=0)
     combined_lat = np.concatenate([lat_sh_trimmed, lat_nh])
 
-    # Re-order to match the target flux grid (may be N -> S)
     target_descending = target_lat[0] > target_lat[-1]
     sort_idx = np.argsort(combined_lat)
     if target_descending:
@@ -366,7 +300,6 @@ def _compute_yearly_area(
     typing.Dict[int, npt.NDArray], typing.Dict[int, npt.NDArray],
     typing.Dict[int, npt.NDArray], typing.Dict[int, npt.NDArray],
 ]:
-    """Compute per-year cyclone/anticyclone area fractions from mask files."""
     with netCDF4.Dataset(str(mask_sh_path)) as ds:
         flag_C_sh = np.asarray(ds["flag_C"][:])
         flag_A_sh = np.asarray(ds["flag_A"][:])
@@ -385,8 +318,6 @@ def _compute_yearly_area(
     n_lon = target_lon.shape[0]
     n_months = 12
 
-    # Target shape for mask -> flux grid interpolation.  We add 2 rows
-    # so we can trim the polar boundary artefacts after interpolation.
     interp_shape = (n_lat + 2, n_lon)
 
     cycl_zon = np.zeros((n_intensity_cuts, n_months, n_lat))
@@ -437,12 +368,18 @@ def _compute_yearly_area(
             ant_avg_nh = np.mean(ant_nh, axis=0)
 
             cyc_combined = _merge_hemispheres(
-                cyc_avg_sh, cyc_avg_nh,
-                lat_sh=lat_sh, lat_nh=lat_nh, target_lat=target_lat,
+                cyc_avg_sh,
+                field_nh=cyc_avg_nh,
+                lat_sh=lat_sh,
+                lat_nh=lat_nh,
+                target_lat=target_lat,
             )
             ant_combined = _merge_hemispheres(
-                ant_avg_sh, ant_avg_nh,
-                lat_sh=lat_sh, lat_nh=lat_nh, target_lat=target_lat,
+                ant_avg_sh,
+                field_nh=ant_avg_nh,
+                lat_sh=lat_sh,
+                lat_nh=lat_nh,
+                target_lat=target_lat,
             )
 
             cyc_hires = _interp_mask_field(cyc_combined, target_shape=interp_shape)[1:-1, :]
@@ -461,12 +398,20 @@ def _compute_yearly_area(
     return cycl_zon, ant_zon, cycl_land_zon, cycl_oce_zon, ant_land_zon, ant_oce_zon
 
 
-# ---------------------------------------------------------------------------
-# Decomposition and DI computations
-# ---------------------------------------------------------------------------
-def _compute_3term_decomp_yearly(
+def _slice_mean(
+    row: npt.NDArray,
     *,
+    centre: int,
+    half_win: int,
+) -> float:
+    i0 = max(0, centre - half_win)
+    i1 = min(row.shape[0], centre + half_win)
+    return float(np.mean(row[i0:i1]))
+
+
+def _compute_3term_decomp_yearly(
     F_TE_cycl_zon: npt.NDArray,
+    *,
     area_nh: npt.NDArray,
     area_sh: npt.NDArray,
     st_nh: npt.NDArray,
@@ -475,7 +420,6 @@ def _compute_3term_decomp_yearly(
     n_fine: int,
     half_win: int,
 ) -> typing.Dict[str, npt.NDArray]:
-    """Compute 3-term decomposition for a single year."""
     n_months = F_TE_cycl_zon.shape[0]
     F_TE_cycl_int = _interp_lat_2d(F_TE_cycl_zon, n_fine=n_fine)
 
@@ -483,8 +427,8 @@ def _compute_3term_decomp_yearly(
     first_term_SH = np.zeros(n_months)
 
     for n in range(n_months):
-        flux_nh = _slice_mean(F_TE_cycl_int[n], st_nh[n], half_win)
-        flux_sh = _slice_mean(F_TE_cycl_int[n], st_sh[n], half_win)
+        flux_nh = _slice_mean(F_TE_cycl_int[n], centre=st_nh[n], half_win=half_win)
+        flux_sh = _slice_mean(F_TE_cycl_int[n], centre=st_sh[n], half_win=half_win)
         sh_idx = (n - 6) % n_months
         first_term_NH[n] = flux_nh / (np.cos(np.deg2rad(lat_f[st_nh[n]])) * area_nh[n])
         first_term_SH[n] = flux_sh / (np.cos(np.deg2rad(lat_f[st_sh[n]])) * area_sh[sh_idx])
@@ -497,8 +441,8 @@ def _compute_3term_decomp_yearly(
     plot_5_sh = np.zeros(n_months)
 
     for n in range(n_months):
-        flux_nh = _slice_mean(F_TE_cycl_int[n], st_nh[n], half_win)
-        flux_sh = _slice_mean(F_TE_cycl_int[n], st_sh[n], half_win)
+        flux_nh = _slice_mean(F_TE_cycl_int[n], centre=st_nh[n], half_win=half_win)
+        flux_sh = _slice_mean(F_TE_cycl_int[n], centre=st_sh[n], half_win=half_win)
         sh_idx = (n - 6) % n_months
 
         plot_2_nh[n] = flux_nh / (np.cos(np.deg2rad(lat_f[st_nh[n]])) * np.mean(area_nh))
@@ -526,13 +470,6 @@ def _compute_3term_decomp_yearly(
     }
 
 
-def _slice_mean(row: npt.NDArray, centre: int, half_win: int) -> float:
-    """Mean of *row* in [centre-half_win, centre+half_win], bounds-safe."""
-    i0 = max(0, centre - half_win)
-    i1 = min(row.shape[0], centre + half_win)
-    return float(np.mean(row[i0:i1]))
-
-
 def _compute_DI_yearly(
     *,
     flux_dict: typing.Dict[str, npt.NDArray],
@@ -546,7 +483,6 @@ def _compute_DI_yearly(
     half_win: int,
     intensity_idx: int,
 ) -> typing.Dict[str, npt.NDArray]:
-    """Compute DI for all flux terms for a single year."""
     out: typing.Dict[str, npt.NDArray] = {}
     flux_keys = [
         ("tot_energy", "tot_energy"),
@@ -567,7 +503,7 @@ def _compute_DI_yearly(
             elif flux_base == "F_UM_z":
                 field_zon = flux_dict["F_TE_z_cycl_0"] - flux_dict["F_TE_z_cycl_5"]
             else:
-                field_zon = flux_dict[f"{flux_base}_cycl_0"] - flux_dict[f"{flux_base}_cycl_5"]
+                field_zon = flux_dict["%s_cycl_0" % flux_base] - flux_dict["%s_cycl_5" % flux_base]
         else:
             if flux_base == "tot_energy":
                 field_zon = flux_dict["tot_energy_cycl_5"] + flux_dict["F_Dhdt_cycl_5"]
@@ -577,11 +513,11 @@ def _compute_DI_yearly(
                     np.zeros_like(flux_dict["F_TE_cycl_5"]),
                 )
             else:
-                field_zon = flux_dict[f"{flux_base}_cycl_5"]
+                field_zon = flux_dict["%s_cycl_5" % flux_base]
 
         fld_int = _interp_lat_2d(field_zon, n_fine=n_fine)
 
-        def norm_factor(lat_deg: npt.NDArray, area_mean: float) -> npt.NDArray:
+        def norm_factor(lat_deg: npt.NDArray, *, area_mean: float) -> npt.NDArray:
             return (
                 constants.EARTH_RADIUS
                 * np.cos(np.deg2rad(lat_deg))
@@ -589,36 +525,35 @@ def _compute_DI_yearly(
             )
 
         nh_raw = (
-            _mean_around_track(fld_int, st_nh, half_win=half_win)
-            / norm_factor(stlat_nh, area_nh_scalar)
+            _mean_around_track(fld_int, idx=st_nh, half_win=half_win)
+            / norm_factor(stlat_nh, area_mean=area_nh_scalar)
         )
         sh_raw = (
-            _mean_around_track(fld_int, st_sh, half_win=half_win)
-            / norm_factor(stlat_sh, area_sh_scalar)
+            _mean_around_track(fld_int, idx=st_sh, half_win=half_win)
+            / norm_factor(stlat_sh, area_mean=area_sh_scalar)
         )
 
-        out[f"D_I_NH_{out_key}{intensity_idx}"] = nh_raw - np.mean(nh_raw)
-        out[f"D_I_SH_{out_key}{intensity_idx}"] = sh_raw - np.mean(sh_raw)
+        out["D_I_NH_%s%d" % (out_key, intensity_idx)] = nh_raw - np.mean(nh_raw)
+        out["D_I_SH_%s%d" % (out_key, intensity_idx)] = sh_raw - np.mean(sh_raw)
 
     for hemi in ("NH", "SH"):
-        tot = out[f"D_I_{hemi}_tot_energy{intensity_idx}"]
-        olr = out[f"D_I_{hemi}_F_Olr{intensity_idx}"]
-        sw = out[f"D_I_{hemi}_F_Swabs{intensity_idx}"]
-        out[f"D_I_{hemi}_F_Shf{intensity_idx}"] = tot - olr - sw
+        tot = out["D_I_%s_tot_energy%d" % (hemi, intensity_idx)]
+        olr = out["D_I_%s_F_Olr%d" % (hemi, intensity_idx)]
+        sw = out["D_I_%s_F_Swabs%d" % (hemi, intensity_idx)]
+        out["D_I_%s_F_Shf%d" % (hemi, intensity_idx)] = tot - olr - sw
 
     return out
 
 
 def _compute_area_at_track_yearly(
     cycl_zon: npt.NDArray,
+    *,
     ant_zon: npt.NDArray,
     st_nh: npt.NDArray,
     st_sh: npt.NDArray,
-    *,
     n_fine: int,
     half_win: int,
 ) -> typing.Dict[str, npt.NDArray]:
-    """Compute area fractions at storm track for intensity cuts 0 and 5."""
     out: typing.Dict[str, npt.NDArray] = {}
     n_months = cycl_zon.shape[1]
 
@@ -626,28 +561,25 @@ def _compute_area_at_track_yearly(
         cyc_int = _interp_lat_2d(cycl_zon[cut_idx], n_fine=n_fine)
         ant_int = _interp_lat_2d(ant_zon[cut_idx], n_fine=n_fine)
 
-        nh_cyc = _mean_around_track(cyc_int, st_nh, half_win=half_win)
+        nh_cyc = _mean_around_track(cyc_int, idx=st_nh, half_win=half_win)
         sh_cyc = np.zeros(n_months)
         for n in range(n_months):
-            sh_cyc[(n - 6) % n_months] = _slice_mean(cyc_int[n], st_sh[n], half_win)
+            sh_cyc[(n - 6) % n_months] = _slice_mean(cyc_int[n], centre=st_sh[n], half_win=half_win)
 
-        nh_ant = _mean_around_track(ant_int, st_nh, half_win=half_win)
+        nh_ant = _mean_around_track(ant_int, idx=st_nh, half_win=half_win)
         sh_ant = np.zeros(n_months)
         for n in range(n_months):
-            sh_ant[(n - 6) % n_months] = _slice_mean(ant_int[n], st_sh[n], half_win)
+            sh_ant[(n - 6) % n_months] = _slice_mean(ant_int[n], centre=st_sh[n], half_win=half_win)
 
         cut_label = 1 if cut_idx == 0 else 6
-        out[f"cycl_NH_{cut_label}"] = nh_cyc
-        out[f"cycl_SH_{cut_label}"] = sh_cyc
-        out[f"ant_NH_{cut_label}"] = nh_ant
-        out[f"ant_SH_{cut_label}"] = sh_ant
+        out["cycl_NH_%d" % cut_label] = nh_cyc
+        out["cycl_SH_%d" % cut_label] = sh_cyc
+        out["ant_NH_%d" % cut_label] = nh_ant
+        out["ant_SH_%d" % cut_label] = sh_ant
 
     return out
 
 
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
 def compute_interannual_variability(
     *,
     flux_file: pathlib.Path,
@@ -661,40 +593,13 @@ def compute_interannual_variability(
     track_half_width_deg: float = _TRACK_HALF_WIDTH_DEG,
     fine_grid_factor: int = _FINE_GRID_FACTOR,
 ) -> None:
-    """Compute interannual variability and save to NetCDF.
-
-    Parameters
-    ----------
-    flux_file
-        Main flux file (e.g. Cyclones_Sampled_Poleward_Fluxes.nc).
-    yearly_flux_files
-        Per-year flux files (YEARS_0.nc, YEARS_1.nc, ...).
-    mask_sh_directory
-        Directory with SH mask files (MASK_SH_{year}.nc).
-    mask_nh_directory
-        Directory with NH mask files (MASK_NH_{year}.nc).
-    output_path
-        Output NetCDF file.
-    year_start
-        Start year (inclusive).
-    year_end
-        End year (exclusive).
-    years_per_file
-        Number of years per yearly flux file.
-    track_half_width_deg
-        Half-width of the storm-track averaging band in degrees latitude.
-    fine_grid_factor
-        Multiplicative factor for latitude interpolation refinement.
-    """
     _LOG.info(
         "Computing interannual variability for years %d-%d",
         year_start, year_end - 1,
     )
 
-    # ---- Read grid geometry from the flux file ----------------------------
     with netCDF4.Dataset(str(flux_file)) as ds:
         latitude = np.asarray(ds["lat"][:])
-        # Infer longitude array from data shape or from the file
         if "lon" in ds.variables:
             longitude = np.asarray(ds["lon"][:])
         else:
@@ -732,8 +637,8 @@ def compute_interannual_variability(
         year = year_start + yr_idx
         _LOG.info("Processing year %d (idx=%d)", year, yr_idx)
 
-        mask_sh_path = mask_sh_directory / f"MASK_SH_{year}.nc"
-        mask_nh_path = mask_nh_directory / f"MASK_NH_{year}.nc"
+        mask_sh_path = mask_sh_directory / ("MASK_SH_%d.nc" % year)
+        mask_nh_path = mask_nh_directory / ("MASK_NH_%d.nc" % year)
 
         if not mask_sh_path.exists() or not mask_nh_path.exists():
             _LOG.warning("Mask files not found for year %d, skipping", year)
@@ -761,12 +666,16 @@ def compute_interannual_variability(
         F_TE_total_zon = fluxes["F_TE_0"]
         F_TE_total_int = _interp_lat_2d(F_TE_total_zon, n_fine=n_fine)
         st_nh, st_sh, stlat_nh, stlat_sh = _stormtrack_from_total_fte(
-            F_TE_total_int, lat_fine,
+            F_TE_total_int, lat_fine=lat_fine,
         )
 
         area_at_track = _compute_area_at_track_yearly(
-            cycl_zon, ant_zon, st_nh, st_sh,
-            n_fine=n_fine, half_win=half_win,
+            cycl_zon,
+            ant_zon=ant_zon,
+            st_nh=st_nh,
+            st_sh=st_sh,
+            n_fine=n_fine,
+            half_win=half_win,
         )
 
         area_weak_nh = area_at_track["cycl_NH_1"] - area_at_track["cycl_NH_6"]
@@ -781,7 +690,7 @@ def compute_interannual_variability(
 
         F_TE_cycl_weak_zon = fluxes["F_TE_cycl_0"] - fluxes["F_TE_cycl_5"]
         decomp_weak = _compute_3term_decomp_yearly(
-            F_TE_cycl_zon=F_TE_cycl_weak_zon,
+            F_TE_cycl_weak_zon,
             area_nh=area_weak_nh, area_sh=area_weak_sh,
             st_nh=st_nh, st_sh=st_sh, lat_f=lat_fine,
             n_fine=n_fine, half_win=half_win,
@@ -789,7 +698,7 @@ def compute_interannual_variability(
 
         F_TE_cycl_strong_zon = fluxes["F_TE_cycl_5"]
         decomp_strong = _compute_3term_decomp_yearly(
-            F_TE_cycl_zon=F_TE_cycl_strong_zon,
+            F_TE_cycl_strong_zon,
             area_nh=area_strong_nh, area_sh=area_strong_sh,
             st_nh=st_nh, st_sh=st_sh, lat_f=lat_fine,
             n_fine=n_fine, half_win=half_win,
@@ -798,10 +707,10 @@ def compute_interannual_variability(
         for key_base, storage in [("plot_2", fig1_plot2),
                                   ("plot_5", fig1_plot5),
                                   ("plot_4", fig1_plot4)]:
-            storage[yr_idx, 0, :] = _running_mean(decomp_weak[f"{key_base}_nh"])
-            storage[yr_idx, 1, :] = _running_mean(decomp_weak[f"{key_base}_sh"])
-            storage[yr_idx, 2, :] = _running_mean(decomp_strong[f"{key_base}_nh"])
-            storage[yr_idx, 3, :] = _running_mean(decomp_strong[f"{key_base}_sh"])
+            storage[yr_idx, 0, :] = _running_mean(decomp_weak["%s_nh" % key_base])
+            storage[yr_idx, 1, :] = _running_mean(decomp_weak["%s_sh" % key_base])
+            storage[yr_idx, 2, :] = _running_mean(decomp_strong["%s_nh" % key_base])
+            storage[yr_idx, 3, :] = _running_mean(decomp_strong["%s_sh" % key_base])
 
         AREA_TO_PERCENT = 100.0
         for line_idx, key in enumerate(("cycl_NH_1", "cycl_SH_1", "cycl_NH_6", "cycl_SH_6")):
@@ -840,7 +749,6 @@ def compute_interannual_variability(
 
         fig5_te_sd[yr_idx, :] = 0.0
 
-    # ---- Aggregate across years -------------------------------------------
     _LOG.info("Computing std across years")
 
     fig1_band_a, fig1_std_a, fig1_std_per_month_a = _band_from_lines(fig1_plot2)
@@ -858,7 +766,6 @@ def compute_interannual_variability(
     fig5_bands = np.std(fig5_te_sd, axis=0)
     _LOG.info("Fig 5 bands: %s", fig5_bands)
 
-    # ---- Write output -----------------------------------------------------
     _LOG.info("Saving to %s", output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -902,11 +809,9 @@ def compute_interannual_variability(
         v.panel_order = "CA_land, CA_ocean, 6CVU_land, 6CVU_ocean"
 
         ds.description = (
-            f"Interannual variability metrics for gray bands in Figures 1, 2, 4, 5. "
-            f"Computed as std across {n_years} years ({year_start}-{year_end - 1}). "
-            f"For multi-line panels, band = max(mean(std_per_month)) across lines."
-        )
+            "Interannual variability metrics for gray bands in Figures 1, 2, 4, 5. "
+            "Computed as std across %d years (%d-%d). "
+            "For multi-line panels, band = max(mean(std_per_month)) across lines."
+        ) % (n_years, year_start, year_end - 1)
         ds.year_start = year_start
         ds.year_end = year_end
-
-    _LOG.info("Done!")

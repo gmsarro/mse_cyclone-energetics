@@ -12,27 +12,18 @@ import cyclone_energetics.constants as constants
 
 _LOG = logging.getLogger(__name__)
 
-# ERA5 CDS variable names changed ~2022.  Old data uses the GRIB parameter
-# IDs (p85.162, p84.162, p83.162), while newer data uses the short names
-# (vigd, vimdf, vithed).  We check for both.
-_VINT_NAME_MAPS: list = [
+_VINT_NAME_MAPS: list[dict[str, str]] = [
     {"vigd": "vigd_filtered", "vimdf": "vimdf_filtered", "vithed": "vithed_filtered"},
     {"vigd": "p85.162_filtered", "vimdf": "p84.162_filtered", "vithed": "p83.162_filtered"},
 ]
 
 
-def _resolve_vint_names(
-    *,
-    ds: netCDF4.Dataset,
-) -> dict:
-    """Return the correct variable-name mapping for a smoothed vint file."""
+def _resolve_vint_names(*, ds: netCDF4.Dataset) -> dict[str, str]:
     for mapping in _VINT_NAME_MAPS:
         if all(v in ds.variables for v in mapping.values()):
             return mapping
     available = list(ds.variables.keys())
-    raise KeyError(
-        "Cannot find vint variables in file.  Available: %s" % available
-    )
+    raise KeyError("Cannot find vint variables in file.  Available: %s" % available)
 
 
 def _poleward_integrate_core(
@@ -41,12 +32,6 @@ def _poleward_integrate_core(
     latitude: npt.NDArray[np.floating],
     reference_field: npt.NDArray[np.floating] | None = None,
 ) -> npt.NDArray[np.floating]:
-    """Shared poleward-integration logic.
-
-    If *reference_field* is ``None``, the global mean of *field* itself is
-    subtracted (self-referencing mode).  Otherwise the global mean of
-    *reference_field* is subtracted.
-    """
     lat_rad = np.deg2rad(latitude)
     cos_lat = np.cos(lat_rad)
 
@@ -70,7 +55,7 @@ def _poleward_integrate_core(
     avg_integral = (
         2.0
         * np.pi
-        * constants.EARTH_RADIUS ** 2
+        * constants.EARTH_RADIUS**2
         * (integral_south[::-1][1:] + integral_north[:-1])
         / 2.0
     )
@@ -82,19 +67,6 @@ def poleward_integration(
     *,
     latitude: npt.NDArray[np.floating],
 ) -> npt.NDArray[np.floating]:
-    """Poleward-integrate a 2-D+ field along the latitude axis (axis 0).
-
-    Accepts shape ``(n_lat, ...)`` and returns ``(n_lat - 2, ...)``.
-    The global mean is removed before integration and the result is expressed
-    in PW (divided by 1e15).
-
-    The integration respects spherical geometry: the field is weighted by
-    ``cos(lat)`` and integrated over ``d(lat_rad)``, then multiplied by
-    ``2 * pi * a^2`` to recover the full zonal-mean poleward transport.
-
-    Both north-to-south and south-to-north integrations are performed, and
-    the average is returned to reduce accumulation bias.
-    """
     return _poleward_integrate_core(field, latitude=latitude)
 
 
@@ -104,10 +76,8 @@ def poleward_integration_individual(
     reference_field: npt.NDArray[np.floating],
     latitude: npt.NDArray[np.floating],
 ) -> npt.NDArray[np.floating]:
-    """Like :func:`poleward_integration` but subtracts the global mean of a
-    *separate* reference field instead of the field itself."""
     return _poleward_integrate_core(
-        field, latitude=latitude, reference_field=reference_field,
+        field, latitude=latitude, reference_field=reference_field
     )
 
 
@@ -116,11 +86,6 @@ def _poleward_integrate_batch(
     fields: dict[str, npt.NDArray[np.floating]],
     latitude: npt.NDArray[np.floating],
 ) -> dict[str, npt.NDArray[np.floating]]:
-    """Integrate all flux fields in one vectorised pass.
-
-    Each value in *fields* must have shape ``(n_time, n_lat, n_lon)``.
-    Returns arrays of shape ``(n_time, n_lat - 2, n_lon)``.
-    """
     lat_rad = np.deg2rad(latitude)
     cos_lat = np.cos(lat_rad)
     cos_3d = cos_lat[np.newaxis, :, np.newaxis]
@@ -140,7 +105,7 @@ def _poleward_integrate_batch(
         avg_integral = (
             2.0
             * np.pi
-            * constants.EARTH_RADIUS ** 2
+            * constants.EARTH_RADIUS**2
             * (integral_south[:, ::-1, :][:, 1:, :] + integral_north[:, :-1, :])
             / 2.0
         )
@@ -175,18 +140,12 @@ def integrate_fluxes_poleward(
                 te_n = np.array(ds_te["TE"][:max_day])
 
             with netCDF4.Dataset(
-                str(
-                    dhdt_directory
-                    / ("tend_%d_%s_filtered_2.nc" % (year, month))
-                )
+                str(dhdt_directory / ("tend_%d_%s_filtered_2.nc" % (year, month)))
             ) as ds_dhdt:
                 dhdt = np.array(ds_dhdt["tend_filtered"][:max_day, ::-1])
 
             with netCDF4.Dataset(
-                str(
-                    vint_directory
-                    / ("era5_vint_%d_%s_filtered.nc" % (year, month))
-                )
+                str(vint_directory / ("era5_vint_%d_%s_filtered.nc" % (year, month)))
             ) as ds_vint:
                 vn = _resolve_vint_names(ds=ds_vint)
                 vigd = np.array(ds_vint[vn["vigd"]][:max_day, ::-1])
@@ -201,8 +160,7 @@ def integrate_fluxes_poleward(
 
             with netCDF4.Dataset(
                 str(
-                    radiation_directory
-                    / ("era5_rad_%d_%s.6hrly.nc" % (year, month))
+                    radiation_directory / ("era5_rad_%d_%s.6hrly.nc" % (year, month))
                 )
             ) as ds_rad:
                 tsr = np.nan_to_num(
@@ -247,23 +205,30 @@ def integrate_fluxes_poleward(
                 f_te=batch["te"],
             )
 
-            # Advective MSE integration (u_mse, v_mse)
-            f_u_mse_int = None
-            f_v_mse_int = None
+            f_u_mse_int: npt.NDArray[np.floating] | None = None
+            f_v_mse_int: npt.NDArray[np.floating] | None = None
             if adv_mse_directory is not None:
                 adv_path = adv_mse_directory / (
                     "Adv_%d_%s_filtered.nc" % (year, month)
                 )
                 if adv_path.exists():
                     with netCDF4.Dataset(str(adv_path)) as ds_adv:
-                        adv_lat = np.array(ds_adv["latitude"][::-1], dtype=np.float64)
+                        adv_lat = np.array(
+                            ds_adv["latitude"][::-1], dtype=np.float64
+                        )
                         adv_lon = np.array(ds_adv["longitude"][:], dtype=np.float64)
                         u_mse_raw = np.nan_to_num(
-                            np.array(ds_adv["u_mse_filtered"][:max_day, ::-1], dtype=np.float64),
+                            np.array(
+                                ds_adv["u_mse_filtered"][:max_day, ::-1],
+                                dtype=np.float64,
+                            ),
                             nan=0.0,
                         )
                         v_mse_raw = np.nan_to_num(
-                            np.array(ds_adv["v_mse_filtered"][:max_day, ::-1], dtype=np.float64),
+                            np.array(
+                                ds_adv["v_mse_filtered"][:max_day, ::-1],
+                                dtype=np.float64,
+                            ),
                             nan=0.0,
                         )
 
@@ -273,7 +238,11 @@ def integrate_fluxes_poleward(
                     )
                     f_u_mse_int = adv_batch["u_mse"]
                     f_v_mse_int = adv_batch["v_mse"]
-                    _LOG.info("Advective MSE integration done for year=%s month=%s", year, month)
+                    _LOG.info(
+                        "Advective MSE integration done for year=%s month=%s",
+                        year,
+                        month,
+                    )
 
             _save_new_integrated_fluxes(
                 output_path=output_directory
@@ -290,16 +259,18 @@ def integrate_fluxes_poleward(
 def _save_integrated_fluxes(
     *,
     output_path: pathlib.Path,
-    lat: npt.NDArray,
-    lon: npt.NDArray,
-    time_vals: npt.NDArray,
-    tot_energy: npt.NDArray,
-    f_swabs: npt.NDArray,
-    f_olr: npt.NDArray,
-    f_shf: npt.NDArray,
-    f_te: npt.NDArray,
+    lat: npt.NDArray[np.floating],
+    lon: npt.NDArray[np.floating],
+    time_vals: npt.NDArray[np.floating],
+    tot_energy: npt.NDArray[np.floating],
+    f_swabs: npt.NDArray[np.floating],
+    f_olr: npt.NDArray[np.floating],
+    f_shf: npt.NDArray[np.floating],
+    f_te: npt.NDArray[np.floating],
 ) -> None:
-    with netCDF4.Dataset(str(output_path), "w", format="NETCDF3_CLASSIC") as wfile:
+    with netCDF4.Dataset(
+        str(output_path), "w", format="NETCDF3_CLASSIC"
+    ) as wfile:
         wfile.createDimension("lon", len(lon))
         wfile.createDimension("lat", len(lat))
         wfile.createDimension("time", None)
@@ -315,8 +286,12 @@ def _save_integrated_fluxes(
         swabs_var = wfile.createVariable(
             "F_Swabs_final", "f4", ("time", "lat", "lon")
         )
-        olr_var = wfile.createVariable("F_Olr_final", "f4", ("time", "lat", "lon"))
-        shf_var = wfile.createVariable("F_Shf_final", "f4", ("time", "lat", "lon"))
+        olr_var = wfile.createVariable(
+            "F_Olr_final", "f4", ("time", "lat", "lon")
+        )
+        shf_var = wfile.createVariable(
+            "F_Shf_final", "f4", ("time", "lat", "lon")
+        )
 
         lat_var.units = "Degrees North"
         lat_var.axis = "Y"
@@ -339,14 +314,16 @@ def _save_integrated_fluxes(
 def _save_new_integrated_fluxes(
     *,
     output_path: pathlib.Path,
-    lat: npt.NDArray,
-    lon: npt.NDArray,
-    time_vals: npt.NDArray,
-    f_dhdt: npt.NDArray,
-    f_u_mse: npt.NDArray | None = None,
-    f_v_mse: npt.NDArray | None = None,
+    lat: npt.NDArray[np.floating],
+    lon: npt.NDArray[np.floating],
+    time_vals: npt.NDArray[np.floating],
+    f_dhdt: npt.NDArray[np.floating],
+    f_u_mse: npt.NDArray[np.floating] | None = None,
+    f_v_mse: npt.NDArray[np.floating] | None = None,
 ) -> None:
-    with netCDF4.Dataset(str(output_path), "w", format="NETCDF3_CLASSIC") as wfile:
+    with netCDF4.Dataset(
+        str(output_path), "w", format="NETCDF3_CLASSIC"
+    ) as wfile:
         wfile.createDimension("lon", len(lon))
         wfile.createDimension("lat", len(lat))
         wfile.createDimension("time", None)

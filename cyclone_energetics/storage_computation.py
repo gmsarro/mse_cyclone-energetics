@@ -1,21 +1,5 @@
 from __future__ import annotations
 
-"""Compute the vertically integrated MSE storage term (dh/dt).
-
-The storage term is the time tendency of the vertically integrated moist
-static energy (MSE).  For each 6-hourly timestep the 3-D MSE is
-computed as
-
-    h = (c_p * T  +  L_v * q) * beta
-
-where *beta* is the below-ground weighting factor computed from the
-**time-mean** surface pressure.  The centred-difference time derivative
-is then vertically integrated and written to a NetCDF file.
-
-The computation is performed in latitude chunks to keep memory usage
-within reasonable bounds.
-"""
-
 import gc
 import logging
 import pathlib
@@ -30,8 +14,8 @@ import cyclone_energetics.gridded_data as gridded_data
 _LOG = logging.getLogger(__name__)
 
 _DEFAULT_CHUNK_SIZE: int = 36
-_DT_CENTERED: float = 43200.0   # 12 h in seconds (centred difference)
-_DT_FORWARD: float = 21600.0    # 6 h in seconds (forward / backward diff)
+_DT_CENTERED: float = 43200.0
+_DT_FORWARD: float = 21600.0
 
 
 def compute_storage_term(
@@ -110,7 +94,7 @@ def _process_single_month_dhdt(
     chunk = min(_DEFAULT_CHUNK_SIZE, n_lat)
     n_blocks = (n_lat + chunk - 1) // chunk
 
-    ps_all = gridded_data.open_field(ps_path, vn["surface_pressure"])
+    ps_all = gridded_data.open_field(ps_path, variable=vn["surface_pressure"])
     ps_mean = ps_all.mean(dim="time")
     del ps_all
 
@@ -131,10 +115,10 @@ def _process_single_month_dhdt(
         )
 
         ta = gridded_data.open_field(
-            t_path, vn["temperature"], latitude_slice=lat_sl,
+            t_path, variable=vn["temperature"], latitude_slice=lat_sl,
         ).assign_coords(level=plev_pa)
         hus = gridded_data.open_field(
-            q_path, vn["specific_humidity"], latitude_slice=lat_sl,
+            q_path, variable=vn["specific_humidity"], latitude_slice=lat_sl,
         ).assign_coords(level=plev_pa)
 
         mse = (

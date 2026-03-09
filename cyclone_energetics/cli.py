@@ -4,7 +4,6 @@ import logging
 import pathlib
 import typing
 
-import numpy as np
 import typer
 import typing_extensions
 

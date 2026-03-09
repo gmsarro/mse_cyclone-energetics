@@ -9,7 +9,6 @@ import numpy.typing as npt
 import scipy.interpolate
 
 import cyclone_energetics.constants as constants
-import cyclone_energetics.integration as integration
 
 _LOG = logging.getLogger(__name__)
 
@@ -24,14 +23,14 @@ _FLUX_NAMES: list[str] = [
     "F_v_mse",
 ]
 
+
 def _interpolate_masks_to_era5(
     *,
-    mask_data: npt.NDArray,
+    mask_data: npt.NDArray[np.floating],
     n_lat_target: int,
     n_lon_target: int,
     n_time: int,
-) -> npt.NDArray:
-    """Interpolate mask data to target grid dimensions."""
+) -> npt.NDArray[np.floating]:
     n_lat_src, n_lon_src = mask_data.shape[-2], mask_data.shape[-1]
     x = np.linspace(0, n_lon_src, n_lon_src)
     y = np.linspace(0, n_lat_src, n_lat_src)
@@ -49,10 +48,10 @@ def _interpolate_masks_to_era5(
 
 def _apply_mask(
     *,
-    flux_data: npt.NDArray,
-    mask: npt.NDArray,
+    flux_data: npt.NDArray[np.floating],
+    mask: npt.NDArray[np.floating],
     threshold: float = 0.5,
-) -> npt.NDArray:
+) -> npt.NDArray[np.floating]:
     masked = np.copy(flux_data)
     idx_below = mask[:, 1:-1] < threshold
     masked[idx_below] = 0.0
@@ -72,7 +71,6 @@ def assign_fluxes_with_intensity(
     output_directory.mkdir(parents=True, exist_ok=True)
     n_cuts = len(constants.INTENSITY_CUTS)
 
-    # Determine grid dimensions from first available file
     first_year = year_start
     first_month = constants.MONTH_STRINGS[0]
     with netCDF4.Dataset(
@@ -174,8 +172,8 @@ def _load_monthly_fluxes(
     year: int,
     month: str,
     max_day: int,
-) -> dict[str, npt.NDArray]:
-    result: dict[str, npt.NDArray] = {}
+) -> dict[str, npt.NDArray[np.floating]]:
+    result: dict[str, npt.NDArray[np.floating]] = {}
     with netCDF4.Dataset(
         str(
             integrated_flux_directory
@@ -214,11 +212,11 @@ def _load_mask_file(
     mask_path: pathlib.Path,
     month_start: int,
     month_end: int,
-) -> dict[str, npt.NDArray]:
+) -> dict[str, npt.NDArray[np.floating]]:
     with netCDF4.Dataset(str(mask_path)) as ds:
         return {
-            "lat": ds["lat"][:],
-            "lon": ds["lon"][:],
+            "lat": np.array(ds["lat"][:]),
+            "lon": np.array(ds["lon"][:]),
             "flag_A": np.array(ds["flag_A"][month_start:month_end]),
             "flag_C": np.array(ds["flag_C"][month_start:month_end]),
             "intensity_A": np.array(ds["intensity_A"][month_start:month_end]),
@@ -228,14 +226,13 @@ def _load_mask_file(
 
 def _combine_hemisphere_masks(
     *,
-    mask_sh: dict[str, npt.NDArray],
-    mask_nh: dict[str, npt.NDArray],
+    mask_sh: dict[str, npt.NDArray[np.floating]],
+    mask_nh: dict[str, npt.NDArray[np.floating]],
     intensity_cut: int,
     n_time: int,
     n_lat_target: int,
     n_lon_target: int,
-) -> tuple[npt.NDArray, npt.NDArray]:
-    """Combine NH and SH masks and interpolate to target grid."""
+) -> tuple[npt.NDArray[np.floating], npt.NDArray[np.floating]]:
     cyc_sh = np.copy(mask_sh["flag_C"])
     ant_sh = np.copy(mask_sh["flag_A"])
     cyc_nh = np.copy(mask_nh["flag_C"])
@@ -280,9 +277,9 @@ def _combine_hemisphere_masks(
 def _save_assigned_fluxes(
     *,
     output_path: pathlib.Path,
-    flux_arrays: dict[str, dict[str, npt.NDArray]],
-    composite_lat: npt.NDArray,
-    composite_lon: npt.NDArray,
+    flux_arrays: dict[str, dict[str, npt.NDArray[np.floating]]],
+    composite_lat: npt.NDArray[np.floating],
+    composite_lon: npt.NDArray[np.floating],
 ) -> None:
     n_cuts = len(constants.INTENSITY_CUTS)
     with netCDF4.Dataset(

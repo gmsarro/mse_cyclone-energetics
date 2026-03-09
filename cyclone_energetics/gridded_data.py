@@ -1,16 +1,5 @@
 from __future__ import annotations
 
-"""Dimension-safe gridded data reader.
-
-Reads NetCDF fields from any reanalysis (ERA5, MERRA-2) or model output
-(GCM) and normalises dimension names to a canonical form.  Downstream
-computation code never depends on the on-disk dimension layout.
-
-Canonical ordering:
-    4-D fields: (time, level, latitude, longitude)
-    3-D fields: (time, latitude, longitude)
-"""
-
 import pathlib
 import typing
 
@@ -30,58 +19,47 @@ _3D_ORDER: typing.Tuple[str, ...] = ("time", "latitude", "longitude")
 
 
 def _normalise(ds: xarray.Dataset) -> xarray.Dataset:
-    """Rename known dimension variants to canonical names."""
     rename = {k: v for k, v in _DIM_ALIASES.items() if k in ds.dims}
     return ds.rename(rename) if rename else ds
 
 
 def open_field(
     path: pathlib.Path,
-    variable: str,
     *,
+    variable: str,
     latitude_slice: typing.Optional[slice] = None,
     longitude_slice: typing.Optional[slice] = None,
     time_slice: typing.Optional[slice] = None,
     dtype: type = np.float64,
 ) -> xarray.DataArray:
-    """Read a variable and return as xarray.DataArray with canonical dim names.
-
-    4-D fields have dims ``(time, level, latitude, longitude)``.
-    3-D fields have dims ``(time, latitude, longitude)``.
-    """
-    ds = xarray.open_dataset(str(path), decode_times=False)
-    ds = _normalise(ds)
-    da = ds[variable]
-    if time_slice is not None:
-        da = da.isel(time=time_slice)
-    if latitude_slice is not None:
-        da = da.isel(latitude=latitude_slice)
-    if longitude_slice is not None:
-        da = da.isel(longitude=longitude_slice)
-    canonical = _4D_ORDER if "level" in da.dims else _3D_ORDER
-    present = tuple(d for d in canonical if d in da.dims)
-    da = da.transpose(*present).astype(dtype)
-    da.load()
-    ds.close()
+    with xarray.open_dataset(str(path), decode_times=False) as ds:
+        ds = _normalise(ds)
+        da = ds[variable]
+        if time_slice is not None:
+            da = da.isel(time=time_slice)
+        if latitude_slice is not None:
+            da = da.isel(latitude=latitude_slice)
+        if longitude_slice is not None:
+            da = da.isel(longitude=longitude_slice)
+        canonical = _4D_ORDER if "level" in da.dims else _3D_ORDER
+        present = tuple(d for d in canonical if d in da.dims)
+        da = da.transpose(*present).astype(dtype)
+        da.load()
     return da
 
 
 def read_field(
     path: pathlib.Path,
-    variable: str,
     *,
+    variable: str,
     latitude_slice: typing.Optional[slice] = None,
     longitude_slice: typing.Optional[slice] = None,
     time_slice: typing.Optional[slice] = None,
     dtype: type = np.float64,
-) -> npt.NDArray:
-    """Read a variable and return in canonical dimension order as numpy.
-
-    Convenience wrapper around :func:`open_field` for code that only
-    needs raw arrays.
-    """
+) -> npt.NDArray[typing.Any]:
     da = open_field(
-        path, variable,
+        path,
+        variable=variable,
         latitude_slice=latitude_slice,
         longitude_slice=longitude_slice,
         time_slice=time_slice,
@@ -93,7 +71,6 @@ def read_field(
 def read_coordinates(
     path: pathlib.Path,
 ) -> typing.Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Return ``(latitude, longitude)`` coordinate arrays."""
     with xarray.open_dataset(str(path), decode_times=False) as ds:
         ds = _normalise(ds)
         lat = np.asarray(ds["latitude"].values, dtype=np.float64)
@@ -106,14 +83,12 @@ def read_pressure_levels(
     *,
     scale_to_pa: float = 100.0,
 ) -> npt.NDArray[np.float64]:
-    """Return pressure levels in Pa (input assumed hPa by default)."""
     with xarray.open_dataset(str(path), decode_times=False) as ds:
         ds = _normalise(ds)
         return np.asarray(ds["level"].values, dtype=np.float64) * scale_to_pa
 
 
 def read_n_time(path: pathlib.Path) -> int:
-    """Return the number of timesteps in a file."""
     with xarray.open_dataset(str(path), decode_times=False) as ds:
         ds = _normalise(ds)
         return int(ds.sizes["time"])
@@ -149,7 +124,6 @@ def resolve_path(
     filename_pattern: str = DEFAULT_FILENAME_PATTERN,
     subdirectories: typing.Optional[typing.Dict[str, str]] = None,
 ) -> pathlib.Path:
-    """Build the full path for a given field, year and month."""
     subs = subdirectories or DEFAULT_SUBDIRECTORIES
     subdir = subs[field]
     filename = filename_pattern.format(variable=subdir, year=year, month=month)
@@ -161,19 +135,6 @@ def compute_beta_mask(
     pressure_levels: xarray.DataArray,
     surface_pressure: xarray.DataArray,
 ) -> xarray.DataArray:
-    """Below-ground weighting factor (beta).
-
-    The result dimensions are the union of *pressure_levels* dims and
-    *surface_pressure* dims, so the same function handles both per-timestep
-    and time-mean surface pressure inputs.
-
-    Parameters
-    ----------
-    pressure_levels : DataArray
-        1-D array with dim ``level`` (values in Pa).
-    surface_pressure : DataArray
-        Surface pressure field (any dims without ``level``), in Pa.
-    """
     p = pressure_levels
     ps = surface_pressure
     p_above = p.shift(level=1).fillna(p.isel(level=0))

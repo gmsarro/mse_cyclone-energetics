@@ -1,22 +1,5 @@
 from __future__ import annotations
 
-"""Compute the transient-eddy (TE) divergence.
-
-Produces files ``TE_YYYY_MM.nc`` containing the meridional divergence of
-the vertically integrated transient-eddy MSE flux:
-
-    ∇_y · (1/g) ∫₀ᵖˢ  v' · h' · β²  dp
-
-where v' = v − ⟨v⟩ and h' = h − ⟨h⟩ are anomalies from the monthly
-mean, h = c_p T + g Z + L_v q is the moist static energy, and β is the
-below-ground weighting factor.
-
-The transient-eddy flux divergence captures the contribution of
-sub-monthly (synoptic-scale) variability to the poleward energy
-transport.  It is subsequently smoothed and poleward-integrated in
-downstream pipeline steps.
-"""
-
 import gc
 import logging
 import pathlib
@@ -37,7 +20,6 @@ def _compute_divergence(
     *,
     field: xarray.DataArray,
 ) -> xarray.DataArray:
-    """Meridional divergence on the sphere: (1/(a cos φ)) ∂/∂φ [F cos φ]."""
     lat_rad = np.deg2rad(field.latitude.values)
     cos_lat = np.cos(lat_rad)
     lat_axis = field.dims.index("latitude")
@@ -143,17 +125,17 @@ def _process_single_month_te(
         lat_sl = slice(lat_start, lat_end)
 
         ta = gridded_data.open_field(
-            t_path, vn["temperature"], latitude_slice=lat_sl,
+            t_path, variable=vn["temperature"], latitude_slice=lat_sl,
         ).assign_coords(level=plev_pa)
         hus = gridded_data.open_field(
-            q_path, vn["specific_humidity"], latitude_slice=lat_sl,
+            q_path, variable=vn["specific_humidity"], latitude_slice=lat_sl,
         ).assign_coords(level=plev_pa)
         ps = gridded_data.open_field(
-            ps_path, vn["surface_pressure"], latitude_slice=lat_sl,
+            ps_path, variable=vn["surface_pressure"], latitude_slice=lat_sl,
         )
         zg = (
             gridded_data.open_field(
-                z_path, vn["geopotential"], latitude_slice=lat_sl,
+                z_path, variable=vn["geopotential"], latitude_slice=lat_sl,
             )
             / constants.GRAVITY
         ).assign_coords(level=plev_pa)
@@ -170,7 +152,7 @@ def _process_single_month_te(
         del ta, hus, zg
 
         v = gridded_data.open_field(
-            v_path, vn["meridional_wind"], latitude_slice=lat_sl,
+            v_path, variable=vn["meridional_wind"], latitude_slice=lat_sl,
         ).assign_coords(level=plev_pa)
 
         mse_prime = mse - mse.mean(dim="time")

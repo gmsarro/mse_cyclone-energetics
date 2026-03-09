@@ -1,24 +1,5 @@
 from __future__ import annotations
 
-"""Compute the vertically integrated MSE advection (zonal + meridional).
-
-Produces files ``Adv_YYYY_MM.nc`` containing:
-
-  u_mse:  (1/g) int  u * beta * [d(MSE*beta)/dlon / (a cos lat)]  dp
-  v_mse:  (1/g) int  v * beta * [d(MSE*beta)/dlat / a          ]  dp
-
-where MSE = c_p*T + g*Z + L_v*q is the full moist static energy,
-beta is the below-ground weighting factor computed from the
-**time-mean** surface pressure, and the derivatives are computed
-level-by-level with gradient clipping to suppress numerical artefacts.
-
-The zonal term uses periodic longitude boundary padding.
-The meridional term uses the standard (non-periodic) latitude gradient.
-
-Both terms are then vertically integrated and written to a single
-NetCDF file per month.
-"""
-
 import gc
 import logging
 import pathlib
@@ -119,10 +100,6 @@ def _process_single_month_advection(
     a = constants.EARTH_RADIUS
     g = constants.GRAVITY
 
-    # ------------------------------------------------------------------
-    # Term 2 (u_mse): zonal advection — chunked along LATITUDE
-    # u * beta * d(MSE*beta)/dlon / (a cos lat)
-    # ------------------------------------------------------------------
     term_two_final = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
 
     lon_mod = np.zeros(n_lon + 2, dtype=np.float64)
@@ -140,17 +117,17 @@ def _process_single_month_advection(
         lat_sl = slice(lat_s, lat_e)
 
         ta = gridded_data.open_field(
-            t_path, vn["temperature"], latitude_slice=lat_sl,
+            t_path, variable=vn["temperature"], latitude_slice=lat_sl,
         ).assign_coords(level=plev_pa)
         hus = gridded_data.open_field(
-            q_path, vn["specific_humidity"], latitude_slice=lat_sl,
+            q_path, variable=vn["specific_humidity"], latitude_slice=lat_sl,
         ).assign_coords(level=plev_pa)
         ps = gridded_data.open_field(
-            ps_path, vn["surface_pressure"], latitude_slice=lat_sl,
+            ps_path, variable=vn["surface_pressure"], latitude_slice=lat_sl,
         )
         zg = (
             gridded_data.open_field(
-                z_path, vn["geopotential"], latitude_slice=lat_sl,
+                z_path, variable=vn["geopotential"], latitude_slice=lat_sl,
             ) / g
         ).assign_coords(level=plev_pa)
 
@@ -163,7 +140,7 @@ def _process_single_month_advection(
         del ta, hus, zg
 
         u_wind = gridded_data.open_field(
-            u_path, vn["zonal_wind"], latitude_slice=lat_sl,
+            u_path, variable=vn["zonal_wind"], latitude_slice=lat_sl,
         ).assign_coords(level=plev_pa)
 
         lat_rad_chunk = np.deg2rad(latitude[lat_s:lat_e])
@@ -180,7 +157,6 @@ def _process_single_month_advection(
         padded[:, :, :, 0] = field_np[:, :, :, -1]
         padded[:, :, :, -1] = field_np[:, :, :, 0]
 
-        cos_lat_4d = cos_lat[np.newaxis, np.newaxis, :, np.newaxis]
         cos_lat_padded = np.broadcast_to(
             cos_lat[np.newaxis, np.newaxis, :, np.newaxis],
             (n_time, n_plev, n_chunk, n_lon + 2),
@@ -214,10 +190,6 @@ def _process_single_month_advection(
         gc.collect()
         _LOG.info("  u_mse block %s complete", lat_block)
 
-    # ------------------------------------------------------------------
-    # Term 1 (v_mse): meridional advection — chunked along LONGITUDE
-    # v * beta * d(MSE*beta)/dlat / a
-    # ------------------------------------------------------------------
     term_one_final = np.zeros((n_time, n_lat, n_lon), dtype=np.float64)
     lat_rad_full = np.deg2rad(latitude)
 
@@ -230,17 +202,17 @@ def _process_single_month_advection(
         lon_sl = slice(lon_s, lon_e)
 
         ta = gridded_data.open_field(
-            t_path, vn["temperature"], longitude_slice=lon_sl,
+            t_path, variable=vn["temperature"], longitude_slice=lon_sl,
         ).assign_coords(level=plev_pa)
         hus = gridded_data.open_field(
-            q_path, vn["specific_humidity"], longitude_slice=lon_sl,
+            q_path, variable=vn["specific_humidity"], longitude_slice=lon_sl,
         ).assign_coords(level=plev_pa)
         ps = gridded_data.open_field(
-            ps_path, vn["surface_pressure"], longitude_slice=lon_sl,
+            ps_path, variable=vn["surface_pressure"], longitude_slice=lon_sl,
         )
         zg = (
             gridded_data.open_field(
-                z_path, vn["geopotential"], longitude_slice=lon_sl,
+                z_path, variable=vn["geopotential"], longitude_slice=lon_sl,
             ) / g
         ).assign_coords(level=plev_pa)
 
@@ -253,7 +225,7 @@ def _process_single_month_advection(
         del ta, hus, zg
 
         v_wind = gridded_data.open_field(
-            v_path, vn["meridional_wind"], longitude_slice=lon_sl,
+            v_path, variable=vn["meridional_wind"], longitude_slice=lon_sl,
         ).assign_coords(level=plev_pa)
 
         beta_for_div = beta.where(beta != 0, np.nan)
@@ -288,9 +260,6 @@ def _process_single_month_advection(
         gc.collect()
         _LOG.info("  v_mse block %s complete", lon_block)
 
-    # ------------------------------------------------------------------
-    # Save output: Adv_YYYY_MM.nc  with variables v_mse and u_mse
-    # ------------------------------------------------------------------
     out_path = output_directory / ("Adv_%d_%s.nc" % (year, month))
     ds_out = xarray.Dataset(
         {

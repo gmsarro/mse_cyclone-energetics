@@ -1,26 +1,5 @@
 from __future__ import annotations
 
-"""Hoskins spectral filter for ERA5 derived fields.
-
-Drives the NCL script ``ncl/hoskins_filter.ncl`` which applies the
-Hoskins spectral filter (Sardeshmukh & Hoskins, 1984) to gridded data.
-
-The field is decomposed into spherical harmonics (``shaeC``), the
-spectral coefficients are truncated and multiplied by the Hoskins
-damping coefficient
-
-    w(n) = exp[ −(n(n+1) / n₀(n₀+1))^r ]
-
-with n₀ = 60 and r = 1, then synthesised back to grid space
-(``shseC``).  NCL's built-in spherical-harmonic routines are extremely
-efficient and well-tested.
-
-Only the ERA5 vertically-integrated energy terms (vint: ``vigd``,
-``vimdf``, ``vithed``) and the storage term (dh/dt) are smoothed.
-The transient-eddy (TE) divergence is **not** smoothed because the
-monthly anomaly product is already sufficiently smooth.
-"""
-
 import logging
 import os
 import pathlib
@@ -32,7 +11,6 @@ import cyclone_energetics.constants as constants
 
 _LOG = logging.getLogger(__name__)
 
-# Locate the NCL script shipped with this package
 _NCL_SCRIPT: pathlib.Path = (
     pathlib.Path(__file__).resolve().parent.parent / "ncl" / "hoskins_filter.ncl"
 )
@@ -42,36 +20,13 @@ def hoskins_spectral_smooth(
     *,
     input_path: pathlib.Path,
     output_path: pathlib.Path,
-    variable_names: list,
-    output_variable_names: list = None,
+    variable_names: list[str],
+    output_variable_names: list[str] | None = None,
     ntrunc: int = constants.HOSKINS_NTRUNC,
     n0: int = constants.HOSKINS_N0,
     r: int = constants.HOSKINS_R,
-    ncl_script: pathlib.Path = None,
+    ncl_script: pathlib.Path | None = None,
 ) -> None:
-    """Apply the Hoskins spectral filter by calling the NCL script.
-
-    Parameters
-    ----------
-    input_path : pathlib.Path
-        NetCDF file to filter.
-    output_path : pathlib.Path
-        Destination for the filtered NetCDF file.
-    variable_names : list[str]
-        Variables to filter (e.g. ``["tend"]`` or ``["vigd", "vimdf", "vithed"]``).
-    output_variable_names : list[str] or None
-        Output variable names.  If *None*, each input name gets a
-        ``_filtered`` suffix.
-    ntrunc : int
-        Maximum total wavenumber (T-number) to retain.
-    n0 : int
-        Hoskins filter damping wavenumber.
-    r : int
-        Hoskins filter exponent.
-    ncl_script : pathlib.Path or None
-        Override path to the NCL script.  Defaults to
-        ``<repo>/ncl/hoskins_filter.ncl``.
-    """
     if ncl_script is None:
         ncl_script = _NCL_SCRIPT
 
@@ -128,12 +83,6 @@ def hoskins_spectral_smooth(
 def _detect_vint_variable_names(
     vint_path: pathlib.Path,
 ) -> tuple[list[str], list[str]]:
-    """Return (input_names, output_names) for the three vint variables.
-
-    ERA5 CDS changed variable names around 2022.  Older files use GRIB
-    parameter IDs (p85.162, p84.162, p83.162) while newer files use short
-    names (vigd, vimdf, vithed).  We check which convention the file uses.
-    """
     with netCDF4.Dataset(str(vint_path)) as ds:
         keys = list(ds.variables.keys())
 
@@ -165,17 +114,6 @@ def smooth_all_pipeline_fields(
     output_adv_mse_directory: pathlib.Path | None = None,
     ntrunc: int = constants.HOSKINS_NTRUNC,
 ) -> None:
-    """Apply the Hoskins spectral filter to all pipeline fields.
-
-    This replaces the NCL scripts ``smooth_vint.ncl``,
-    ``smooth_dh_dt_ERA5.ncl``, and ``smooth_adv_mse.ncl``.
-
-    The transient-eddy (TE) divergence is **not** smoothed; it is
-    already sufficiently smooth from the monthly anomaly computation.
-
-    Filtered fields: dh/dt, ERA5 vertically-integrated energy terms
-    (vint), and advective MSE (u_mse + v_mse).
-    """
     output_dhdt_directory.mkdir(parents=True, exist_ok=True)
     output_vint_directory.mkdir(parents=True, exist_ok=True)
     if output_adv_mse_directory is not None:
@@ -183,7 +121,6 @@ def smooth_all_pipeline_fields(
 
     for year in range(year_start, year_end):
         for month in constants.MONTH_STRINGS:
-            # dh/dt files — the storage computation writes tend_YYYY_MM_2.nc
             dhdt_in = dhdt_directory / ("tend_%d_%s_2.nc" % (year, month))
             dhdt_out = output_dhdt_directory / ("tend_%d_%s_filtered_2.nc" % (year, month))
             if dhdt_in.exists():
@@ -195,10 +132,6 @@ def smooth_all_pipeline_fields(
                     ntrunc=ntrunc,
                 )
 
-            # Vint files (three variables).
-            # ERA5 CDS changed variable names circa 2022: older files use
-            # GRIB parameter IDs (p85.162, p84.162, p83.162) while newer
-            # files use the short names (vigd, vimdf, vithed).
             vint_in = vint_directory / ("era5_vint_%d_%s.6hrly.nc" % (year, month))
             vint_out = output_vint_directory / (
                 "era5_vint_%d_%s_filtered.nc" % (year, month)
@@ -213,7 +146,6 @@ def smooth_all_pipeline_fields(
                     ntrunc=ntrunc,
                 )
 
-            # Advective MSE files (u_mse + v_mse).
             if adv_mse_directory is not None and output_adv_mse_directory is not None:
                 adv_in = adv_mse_directory / ("Adv_%d_%s.nc" % (year, month))
                 adv_out = output_adv_mse_directory / (

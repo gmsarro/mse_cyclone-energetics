@@ -27,7 +27,7 @@ def _load_track_npz(
     track_type: str,
     hemisphere: str,
     track_filename_pattern: str = "{track_type}_VO_anom_T42_ERA5_{hemisphere}_long.npz",
-) -> dict[str, npt.NDArray]:
+) -> dict[str, npt.NDArray[np.float64]]:
     fname = track_filename_pattern.format(
         track_type=track_type,
         hemisphere=hemisphere,
@@ -42,14 +42,14 @@ def _build_grids(
     y1: int,
     y2: int,
 ) -> tuple[
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
 ]:
     lats = np.arange(-90, 90 + _TRACK_GRID_SPACING, _TRACK_GRID_SPACING)
     latt = lats[y1:y2]
@@ -66,34 +66,34 @@ def _build_grids(
 
 def _process_single_timestep(
     *,
-    vorticity: npt.NDArray,
+    vorticity: npt.NDArray[np.float64],
     vorticity_threshold: float,
-    track_data_c: dict[str, npt.NDArray],
-    track_data_a: dict[str, npt.NDArray],
-    sec_c: npt.NDArray,
-    sec_a: npt.NDArray,
-    p_points: npt.NDArray,
-    mesh_points: npt.NDArray,
-    xx_polar: npt.NDArray,
-    yy_polar: npt.NDArray,
+    track_data_c: dict[str, npt.NDArray[np.float64]],
+    track_data_a: dict[str, npt.NDArray[np.float64]],
+    sec_c: npt.NDArray[np.intp],
+    sec_a: npt.NDArray[np.intp],
+    p_points: npt.NDArray[np.float64],
+    mesh_points: npt.NDArray[np.float64],
+    xx_polar: npt.NDArray[np.float64],
+    yy_polar: npt.NDArray[np.float64],
     hemisphere: str,
     p_xx_shape: tuple[int, ...],
 ) -> tuple[
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
+    npt.NDArray[np.float64],
 ]:
     new_vor = scipy.interpolate.griddata(
         p_points, vorticity.ravel(), mesh_points
     ).reshape(np.shape(xx_polar))
 
-    results = {}
-    for k, label in [("C", "cyclone"), ("A", "anticyclone")]:
+    results: dict[str, dict[str, npt.NDArray[np.float64]]] = {}
+    for k, _ in [("C", "cyclone"), ("A", "anticyclone")]:
         if k == "C":
             cvu = vorticity_threshold
             over_mask = new_vor.ravel() >= vorticity_threshold
@@ -196,38 +196,28 @@ def _process_single_timestep(
             "intensity_change": intensity_change_field,
         }
 
-    mask_c = scipy.interpolate.griddata(
-        mesh_points, results["C"]["mask"].ravel(), p_points, method="nearest"
-    ).reshape(p_xx_shape)
-    mask_a = scipy.interpolate.griddata(
-        mesh_points, results["A"]["mask"].ravel(), p_points, method="nearest"
-    ).reshape(p_xx_shape)
-    flag_c = scipy.interpolate.griddata(
-        mesh_points, results["C"]["flag"].ravel(), p_points, method="nearest"
-    ).reshape(p_xx_shape)
-    flag_a = scipy.interpolate.griddata(
-        mesh_points, results["A"]["flag"].ravel(), p_points, method="nearest"
-    ).reshape(p_xx_shape)
-    int_c = scipy.interpolate.griddata(
-        mesh_points, results["C"]["intensity"].ravel(), p_points, method="nearest"
-    ).reshape(p_xx_shape)
-    int_a = scipy.interpolate.griddata(
-        mesh_points, results["A"]["intensity"].ravel(), p_points, method="nearest"
-    ).reshape(p_xx_shape)
-    int_del_c = scipy.interpolate.griddata(
-        mesh_points,
-        results["C"]["intensity_change"].ravel(),
-        p_points,
-        method="nearest",
-    ).reshape(p_xx_shape)
-    int_del_a = scipy.interpolate.griddata(
-        mesh_points,
-        results["A"]["intensity_change"].ravel(),
-        p_points,
-        method="nearest",
-    ).reshape(p_xx_shape)
+    field_names = ["mask", "flag", "intensity", "intensity_change"]
+    interpolated: dict[tuple[str, str], npt.NDArray[np.float64]] = {}
+    for category in ("C", "A"):
+        for field_name in field_names:
+            key = (category, field_name)
+            interpolated[key] = scipy.interpolate.griddata(
+                mesh_points,
+                results[category][field_name].ravel(),
+                p_points,
+                method="nearest",
+            ).reshape(p_xx_shape)
 
-    return mask_c, mask_a, flag_c, flag_a, int_c, int_a, int_del_c, int_del_a
+    return (
+        interpolated[("C", "mask")],
+        interpolated[("A", "mask")],
+        interpolated[("C", "flag")],
+        interpolated[("A", "flag")],
+        interpolated[("C", "intensity")],
+        interpolated[("A", "intensity")],
+        interpolated[("C", "intensity_change")],
+        interpolated[("A", "intensity_change")],
+    )
 
 
 def create_cyclone_masks(
@@ -359,16 +349,16 @@ def create_cyclone_masks(
 def _save_mask_file(
     *,
     output_path: pathlib.Path,
-    latt: npt.NDArray,
-    lons: npt.NDArray,
-    mask_c: npt.NDArray,
-    mask_a: npt.NDArray,
-    flag_c: npt.NDArray,
-    flag_a: npt.NDArray,
-    int_c: npt.NDArray,
-    int_a: npt.NDArray,
-    int_del_c: npt.NDArray,
-    int_del_a: npt.NDArray,
+    latt: npt.NDArray[np.float64],
+    lons: npt.NDArray[np.float64],
+    mask_c: npt.NDArray[np.float64],
+    mask_a: npt.NDArray[np.float64],
+    flag_c: npt.NDArray[np.float64],
+    flag_a: npt.NDArray[np.float64],
+    int_c: npt.NDArray[np.float64],
+    int_a: npt.NDArray[np.float64],
+    int_del_c: npt.NDArray[np.float64],
+    int_del_a: npt.NDArray[np.float64],
 ) -> None:
     with netCDF4.Dataset(str(output_path), "w", format="NETCDF3_CLASSIC") as wfile:
         wfile.createDimension("lon", len(lons))

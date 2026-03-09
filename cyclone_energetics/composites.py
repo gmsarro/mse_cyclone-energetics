@@ -1,14 +1,5 @@
 from __future__ import annotations
 
-"""Cyclone-centred monthly composites on a storm-relative grid.
-
-Produces composites of both PW (meridionally integrated) and W/m² (local
-ERA5) energy-budget fields for weak and intense cyclones.
-
-The SHF residual is computed as:
-    SHF = column_MSE - Swabs - OLR + dh/dt
-"""
-
 import collections
 import csv
 import logging
@@ -19,7 +10,7 @@ import netCDF4
 import numpy as np
 import numpy.typing as npt
 import scipy.interpolate
-import xarray as xr
+import xarray
 
 import cyclone_energetics.constants as constants
 
@@ -35,8 +26,8 @@ _LAT_BAND_HALF_WIDTH: float = 5.0
 
 _GRAVITY: float = 9.81
 _LV: float = 2.501e6
-_GEOPOTENTIAL_LEVEL: int = 30
-_Q_LEVEL: int = 35
+_GEOPOTENTIAL_PRESSURE_HPA: float = 850.0
+_Q_PRESSURE_HPA: float = 975.0
 _VO_GRID_SIZE: int = 20
 _STORMTRACK_INTERP_NPTS: int = 25600
 
@@ -59,6 +50,16 @@ _PW_FIELD_MAP: typing.Dict[str, typing.Tuple[str, int]] = {
 _WM2_FIELD_NAMES: typing.List[str] = [
     "energy_wm", "Dhdt_wm", "Swabs_wm", "Olr_wm", "Shf_wm",
     "Z", "T", "Q", "VO",
+]
+
+_WM2_EXTRACT_FIELDS: typing.List[typing.Tuple[str, str]] = [
+    ("energy_wm", "energy_wm"),
+    ("Dhdt_wm", "dhdt_wm"),
+    ("Swabs_wm", "swabs_wm"),
+    ("Olr_wm", "olr_wm"),
+    ("Z", "z_wm"),
+    ("T", "t_wm"),
+    ("Q", "q_wm"),
 ]
 
 
@@ -150,7 +151,6 @@ def compute_stormtrack_latitudes(
 
 
 class _MonthlyData:
-    """Preload all needed 2D fields for a given (year, month) into numpy."""
 
     def __init__(
         self,
@@ -201,6 +201,49 @@ class _MonthlyData:
         self._load_pw()
         self._load_wm2()
 
+    def _load_sorted_field(
+        self,
+        *,
+        path: pathlib.Path,
+        var_name: str,
+        pressure_hpa: typing.Optional[float] = None,
+        scale: float = 1.0,
+        pre_flip_lat: bool = False,
+        post_reverse_lon: bool = False,
+        lat_key: str = "latitude",
+        lon_key: str = "longitude",
+    ) -> typing.Optional[typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]]:
+        if not path.exists():
+            return None
+        try:
+            with netCDF4.Dataset(str(path)) as ds:
+                lat = np.asarray(ds[lat_key][:], dtype=np.float32)
+                lon = _to_360(np.asarray(ds[lon_key][:], dtype=np.float32))
+                lat, lon, lat_flip, lon_order = _sort_coords(lat=lat, lon=lon)
+                if pressure_hpa is not None:
+                    levels = np.asarray(ds["level"][:])
+                    level_idx = int(np.argmin(np.abs(levels - pressure_hpa)))
+                    arr = np.asarray(
+                        ds[var_name][:self.nt, level_idx, :, :], dtype=np.float32
+                    )
+                else:
+                    arr = np.asarray(ds[var_name][:self.nt], dtype=np.float32)
+                if scale != 1.0:
+                    arr = arr * scale
+                if pre_flip_lat:
+                    arr = arr[:, ::-1, :]
+                if lat_flip:
+                    arr = arr[:, ::-1, :]
+                arr = arr[:, :, lon_order]
+                if post_reverse_lon:
+                    arr = arr[:, :, ::-1]
+                return arr, lat, lon
+        except (OSError, KeyError) as exc:
+            _LOG.debug(
+                "  Skipping %s for %d/%02d: %s", var_name, self.yy, self.mm, exc
+            )
+            return None
+
     def _load_pw(self) -> None:
         path1 = self._integrated_flux_directory / (
             "Integrated_Fluxes_%d_%02d_.nc" % (self.yy, self.mm)
@@ -240,7 +283,7 @@ class _MonthlyData:
         _LOG.info("    PW loaded (%d vars)", len(self.pw1) + len(self.pw2))
 
     def _load_wm2(self) -> None:
-        loaded = []
+        loaded: typing.List[str] = []
 
         vint_path = self._vint_directory / (
             "era5_vint_%d_%02d_filtered.nc" % (self.yy, self.mm)
@@ -276,33 +319,23 @@ class _MonthlyData:
                     self.wm_lon = lon
                     self.energy_wm = vigd + vimdf * _LV + vithed
                     loaded.append("energy_wm")
-            except (OSError, KeyError) as e:
-                _LOG.debug("  Skipping energy_wm for %d/%02d: %s", self.yy, self.mm, e)
+            except (OSError, KeyError) as exc:
+                _LOG.debug("  Skipping energy_wm for %d/%02d: %s", self.yy, self.mm, exc)
 
-        dhdt_path = self._dhdt_directory / (
-            "tend_%d_%02d_filtered_2.nc" % (self.yy, self.mm)
+        result = self._load_sorted_field(
+            path=self._dhdt_directory / (
+                "tend_%d_%02d_filtered_2.nc" % (self.yy, self.mm)
+            ),
+            var_name="tend_filtered",
+            pre_flip_lat=True,
+            post_reverse_lon=True,
         )
-        if dhdt_path.exists():
-            try:
-                with netCDF4.Dataset(str(dhdt_path)) as ds:
-                    arr = np.asarray(ds["tend_filtered"][:self.nt], dtype=np.float32)
-                    lat = np.asarray(ds["latitude"][:], dtype=np.float32)
-                    lon = _to_360(np.asarray(ds["longitude"][:], dtype=np.float32))
-
-                    arr = arr[:, ::-1, :]
-
-                    lat, lon, lat_flip, lon_order = _sort_coords(lat=lat, lon=lon)
-                    if lat_flip:
-                        arr = arr[:, ::-1, :]
-                    arr = arr[:, :, lon_order]
-                    arr = arr[:, :, ::-1]
-                    self.dhdt_wm = arr
-                    if self.wm_lat is None:
-                        self.wm_lat = lat
-                        self.wm_lon = lon
-                    loaded.append("dhdt_wm")
-            except OSError as e:
-                _LOG.debug("  Skipping dhdt_wm for %d/%02d: %s", self.yy, self.mm, e)
+        if result is not None:
+            self.dhdt_wm, lat, lon = result
+            if self.wm_lat is None:
+                self.wm_lat = lat
+                self.wm_lon = lon
+            loaded.append("dhdt_wm")
 
         rad_path = self._radiation_directory / (
             "era5_rad_%d_%02d.6hrly.nc" % (self.yy, self.mm)
@@ -328,67 +361,44 @@ class _MonthlyData:
                     self.swabs_wm = np.nan_to_num((tsr - ssr) / 3600.0, nan=0.0)
                     self.olr_wm = np.nan_to_num(ttr / 3600.0, nan=0.0)
                     loaded.append("swabs+olr")
-            except OSError as e:
-                _LOG.debug("  Skipping radiation for %d/%02d: %s", self.yy, self.mm, e)
+            except OSError as exc:
+                _LOG.debug("  Skipping radiation for %d/%02d: %s", self.yy, self.mm, exc)
 
-        z_path = self._z_directory / ("era5_z_%d_%02d.6hrly.nc" % (self.yy, self.mm))
-        if z_path.exists():
-            try:
-                with netCDF4.Dataset(str(z_path)) as ds:
-                    lat = np.asarray(ds["latitude"][:], dtype=np.float32)
-                    lon = _to_360(np.asarray(ds["longitude"][:], dtype=np.float32))
-                    lat, lon, lat_flip, lon_order = _sort_coords(lat=lat, lon=lon)
-                    arr = np.asarray(
-                        ds["z"][:self.nt, _GEOPOTENTIAL_LEVEL, :, :],
-                        dtype=np.float32
-                    ) / _GRAVITY
-                    if lat_flip:
-                        arr = arr[:, ::-1, :]
-                    arr = arr[:, :, lon_order]
-                    self.z_wm = arr
-                    if self.wm_lat is None:
-                        self.wm_lat = lat
-                        self.wm_lon = lon
-                    loaded.append("Z")
-            except OSError as e:
-                _LOG.debug("  Skipping Z for %d/%02d: %s", self.yy, self.mm, e)
-
-        t2m_path = self._t2m_directory / (
-            "era5_t2m_%d_%02d.6hrly.nc" % (self.yy, self.mm)
+        result = self._load_sorted_field(
+            path=self._z_directory / (
+                "era5_z_%d_%02d.6hrly.nc" % (self.yy, self.mm)
+            ),
+            var_name="z",
+            pressure_hpa=_GEOPOTENTIAL_PRESSURE_HPA,
+            scale=1.0 / _GRAVITY,
         )
-        if t2m_path.exists():
-            try:
-                with netCDF4.Dataset(str(t2m_path)) as ds:
-                    lat = np.asarray(ds["latitude"][:], dtype=np.float32)
-                    lon = _to_360(np.asarray(ds["longitude"][:], dtype=np.float32))
-                    lat, lon, lat_flip, lon_order = _sort_coords(lat=lat, lon=lon)
-                    arr = np.asarray(ds["t2m"][:self.nt], dtype=np.float32)
-                    if lat_flip:
-                        arr = arr[:, ::-1, :]
-                    arr = arr[:, :, lon_order]
-                    self.t_wm = arr
-                    loaded.append("T")
-            except OSError as e:
-                _LOG.debug("  Skipping T for %d/%02d: %s", self.yy, self.mm, e)
+        if result is not None:
+            self.z_wm, lat, lon = result
+            if self.wm_lat is None:
+                self.wm_lat = lat
+                self.wm_lon = lon
+            loaded.append("Z")
 
-        q_path = self._q_directory / ("era5_q_%d_%02d.6hrly.nc" % (self.yy, self.mm))
-        if q_path.exists():
-            try:
-                with netCDF4.Dataset(str(q_path)) as ds:
-                    lat = np.asarray(ds["latitude"][:], dtype=np.float32)
-                    lon = _to_360(np.asarray(ds["longitude"][:], dtype=np.float32))
-                    lat, lon, lat_flip, lon_order = _sort_coords(lat=lat, lon=lon)
-                    arr = np.asarray(
-                        ds["q"][:self.nt, _Q_LEVEL, :, :],
-                        dtype=np.float32
-                    )
-                    if lat_flip:
-                        arr = arr[:, ::-1, :]
-                    arr = arr[:, :, lon_order]
-                    self.q_wm = arr
-                    loaded.append("Q")
-            except OSError as e:
-                _LOG.debug("  Skipping Q for %d/%02d: %s", self.yy, self.mm, e)
+        result = self._load_sorted_field(
+            path=self._t2m_directory / (
+                "era5_t2m_%d_%02d.6hrly.nc" % (self.yy, self.mm)
+            ),
+            var_name="t2m",
+        )
+        if result is not None:
+            self.t_wm = result[0]
+            loaded.append("T")
+
+        result = self._load_sorted_field(
+            path=self._q_directory / (
+                "era5_q_%d_%02d.6hrly.nc" % (self.yy, self.mm)
+            ),
+            var_name="q",
+            pressure_hpa=_Q_PRESSURE_HPA,
+        )
+        if result is not None:
+            self.q_wm = result[0]
+            loaded.append("Q")
 
         if self._vorticity_directory is not None:
             vo_path = self._vorticity_directory / (
@@ -415,8 +425,8 @@ class _MonthlyData:
                         arr = arr[:, :, vo_lon_order]
                         self.vo = arr
                         loaded.append("VO")
-                except OSError as e:
-                    _LOG.debug("  Skipping VO for %d/%02d: %s", self.yy, self.mm, e)
+                except OSError as exc:
+                    _LOG.debug("  Skipping VO for %d/%02d: %s", self.yy, self.mm, exc)
 
         _LOG.info("    W/m2 loaded [%s]", ", ".join(loaded) if loaded else "none")
 
@@ -441,20 +451,6 @@ def build_cyclone_composites(
     vorticity_directory: typing.Optional[pathlib.Path] = None,
     lat_band_half_width: float = _LAT_BAND_HALF_WIDTH,
 ) -> None:
-    """Build cyclone-centred composites of both PW and W/m² budget terms.
-
-    Parameters
-    ----------
-    hemisphere : str
-        ``"SH"`` or ``"NH"``.
-    intensity_min, intensity_max : int
-        Inclusive CVU intensity range. Use ``(1, 5)`` for weak and
-        ``(6, 99)`` for intense cyclones.
-    track_path : pathlib.Path
-        Track NetCDF file.
-    storm_lat : array (12,)
-        Monthly-mean storm-track latitude for the latitude-band filter.
-    """
     output_directory.mkdir(parents=True, exist_ok=True)
 
     tag = "Weak" if intensity_max <= 5 else "Intense"
@@ -612,97 +608,31 @@ def build_cyclone_composites(
                 *[row_center["%s_center" % nm] for nm in _PW_FIELD_MAP],
             ))
 
-            energy_patch = None
-            if mdata.energy_wm is not None and lt < mdata.energy_wm.shape[0]:
-                energy_patch = _extract_patch_np(
-                    arr2d=mdata.energy_wm[lt],
-                    lat_vals=mdata.wm_lat,
-                    lon_vals=mdata.wm_lon,
-                    lat0=lat0,
-                    lon0=lon0,
-                    lat_offset=lat_rel,
-                    lon_offset=lon_rel,
-                )
-                wm2_comps["energy_wm"][midx] += energy_patch
+            wm2_patches: typing.Dict[str, npt.NDArray] = {}
+            for comp_key, attr_name in _WM2_EXTRACT_FIELDS:
+                source: typing.Optional[npt.NDArray] = getattr(mdata, attr_name)
+                if source is not None and lt < source.shape[0]:
+                    patch = _extract_patch_np(
+                        arr2d=source[lt],
+                        lat_vals=mdata.wm_lat,
+                        lon_vals=mdata.wm_lon,
+                        lat0=lat0,
+                        lon0=lon0,
+                        lat_offset=lat_rel,
+                        lon_offset=lon_rel,
+                    )
+                    wm2_comps[comp_key][midx] += patch
+                    wm2_patches[comp_key] = patch
 
-            dhdt_patch = None
-            if mdata.dhdt_wm is not None and lt < mdata.dhdt_wm.shape[0]:
-                dhdt_patch = _extract_patch_np(
-                    arr2d=mdata.dhdt_wm[lt],
-                    lat_vals=mdata.wm_lat,
-                    lon_vals=mdata.wm_lon,
-                    lat0=lat0,
-                    lon0=lon0,
-                    lat_offset=lat_rel,
-                    lon_offset=lon_rel,
-                )
-                wm2_comps["Dhdt_wm"][midx] += dhdt_patch
-
-            swabs_patch = None
-            olr_patch = None
-            if mdata.swabs_wm is not None and lt < mdata.swabs_wm.shape[0]:
-                swabs_patch = _extract_patch_np(
-                    arr2d=mdata.swabs_wm[lt],
-                    lat_vals=mdata.wm_lat,
-                    lon_vals=mdata.wm_lon,
-                    lat0=lat0,
-                    lon0=lon0,
-                    lat_offset=lat_rel,
-                    lon_offset=lon_rel,
-                )
-                wm2_comps["Swabs_wm"][midx] += swabs_patch
-            if mdata.olr_wm is not None and lt < mdata.olr_wm.shape[0]:
-                olr_patch = _extract_patch_np(
-                    arr2d=mdata.olr_wm[lt],
-                    lat_vals=mdata.wm_lat,
-                    lon_vals=mdata.wm_lon,
-                    lat0=lat0,
-                    lon0=lon0,
-                    lat_offset=lat_rel,
-                    lon_offset=lon_rel,
-                )
-                wm2_comps["Olr_wm"][midx] += olr_patch
-
-            if all(x is not None for x in [energy_patch, swabs_patch, olr_patch, dhdt_patch]):
+            # SHF = column_MSE - Swabs - OLR + dh/dt
+            if all(k in wm2_patches for k in ("energy_wm", "Swabs_wm", "Olr_wm", "Dhdt_wm")):
                 wm2_comps["Shf_wm"][midx] += (
-                    energy_patch - swabs_patch - olr_patch + dhdt_patch
-                )
-
-            if mdata.z_wm is not None and lt < mdata.z_wm.shape[0]:
-                wm2_comps["Z"][midx] += _extract_patch_np(
-                    arr2d=mdata.z_wm[lt],
-                    lat_vals=mdata.wm_lat,
-                    lon_vals=mdata.wm_lon,
-                    lat0=lat0,
-                    lon0=lon0,
-                    lat_offset=lat_rel,
-                    lon_offset=lon_rel,
-                )
-
-            if mdata.t_wm is not None and lt < mdata.t_wm.shape[0]:
-                wm2_comps["T"][midx] += _extract_patch_np(
-                    arr2d=mdata.t_wm[lt],
-                    lat_vals=mdata.wm_lat,
-                    lon_vals=mdata.wm_lon,
-                    lat0=lat0,
-                    lon0=lon0,
-                    lat_offset=lat_rel,
-                    lon_offset=lon_rel,
-                )
-
-            if mdata.q_wm is not None and lt < mdata.q_wm.shape[0]:
-                wm2_comps["Q"][midx] += _extract_patch_np(
-                    arr2d=mdata.q_wm[lt],
-                    lat_vals=mdata.wm_lat,
-                    lon_vals=mdata.wm_lon,
-                    lat0=lat0,
-                    lon0=lon0,
-                    lat_offset=lat_rel,
-                    lon_offset=lon_rel,
+                    wm2_patches["energy_wm"] - wm2_patches["Swabs_wm"]
+                    - wm2_patches["Olr_wm"] + wm2_patches["Dhdt_wm"]
                 )
 
             if mdata.vo is not None and lt < mdata.vo.shape[0]:
-                vo_patch = _extract_patch_np(
+                wm2_comps["VO"][midx] += _extract_patch_np(
                     arr2d=mdata.vo[lt],
                     lat_vals=mdata.vo_lat,
                     lon_vals=mdata.vo_lon,
@@ -711,7 +641,6 @@ def build_cyclone_composites(
                     lat_offset=vo_lat_rel,
                     lon_offset=vo_lon_rel,
                 )
-                wm2_comps["VO"][midx] += vo_patch
 
         del mdata
         _LOG.info("    Done (total accepted so far: %d)", total_accepted)
@@ -748,14 +677,14 @@ def build_cyclone_composites(
         "Composites_%s_%s_noleap_center_samples.csv" % (tag, hemisphere)
     )
 
-    data_vars = {}
+    data_vars: typing.Dict[str, typing.Tuple[typing.Tuple[str, ...], npt.NDArray]] = {}
     for k, v in pw_comps.items():
         data_vars["composite_%s" % k] = (("month", "y", "x"), v.astype("float32"))
     for k, v in wm2_comps.items():
         data_vars["composite_%s" % k] = (("month", "y", "x"), v.astype("float32"))
 
     months = np.arange(1, 13, dtype=np.int16)
-    ds_out = xr.Dataset(
+    ds_out = xarray.Dataset(
         data_vars=data_vars,
         coords={
             "month": ("month", months),
