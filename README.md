@@ -110,19 +110,6 @@ ordering to the canonical `(time, level, latitude, longitude)` form,
 so input files with non-standard dimension names or orderings are
 handled automatically.
 
-## Code style
-
-- **Imports**: `import x` only (no `from x import y`).
-  PEP 8 ordering: stdlib, third-party, local.
-- **Functions**: at most one positional argument; remaining parameters
-  are keyword-only (after `*`).
-- **Typing**: all functions have mypy annotations.
-  Run `mypy cyclone_energetics/` to check.
-- **Logging**: `_LOG.info('message: %s', var)` format (no f-strings).
-  Print statements only in CLI entry points.
-- **Comments**: minimal. Variable and function names are
-  self-documenting.
-
 ## Formatting
 
 ```bash
