@@ -377,7 +377,7 @@ print("\n=== Generating NH weak-cyclone decomposition ===", flush=True)
 plot_2d_composites_nh_decomposition_all(
     C=1, factor=PW_factor_NH,
     levels=np.arange(-12, 13, 1) / 2,
-    levels2=np.arange(-45, 50, 5),
+    levels2=np.arange(-180, 200, 20),
 )
 
 print("\nAll NH composite figures generated successfully.", flush=True)
