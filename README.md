@@ -20,35 +20,36 @@ figures used in the associated publication.
 ## Repository layout
 
 ```
-cyclone_energetics/
-  cli.py                  Typer CLI entry point
-  constants.py            Physical constants and ERA5 calendar arrays
-  geometry.py             Lon/lat ↔ polar stereographic, spherical distance
-  gridded_data.py         Dimension-safe NetCDF reader and coordinate resolver
-  computation/
-    flux.py               Transient-eddy MSE flux divergence (v'h')
-    storage.py            MSE storage term dh/dt
-    advection.py          Zonal + meridional MSE advection
-  smoothing/
-    hoskins.py            Hoskins spectral filter (drives NCL)
-  tracks/
-    processing.py         TRACK algorithm output → .npz arrays
-  masking/
-    masks.py              Cyclone / anticyclone area masks from vorticity contours
-  integration/
-    poleward.py           Poleward integration of energy flux fields
-  assignment/
-    flux_assignment.py    Assign integrated fluxes to cyclone categories
-  composites/
-    builder.py            Cyclone-centred composites (PW and W/m² fields)
-    condensed.py          Condensed monthly composite file
-  variability/
-    interannual.py        Interannual variability for confidence bands
-ncl/
-  hoskins_filter.ncl      NCL Hoskins spectral filter script
-notebooks/
-  final_figures.ipynb     Generates all publication figures
-pyproject.toml            Package metadata and dependencies
+mse_cyclone-energetics/
+├── cyclone_energetics/          # Core Python package
+│   ├── cli.py                   # Typer CLI entry point
+│   ├── constants.py             # Physical constants & ERA5 calendar arrays
+│   ├── geometry.py              # Lon/lat ↔ polar-stereographic transforms
+│   ├── gridded_data.py          # Dimension-safe NetCDF reader
+│   ├── computation/
+│   │   ├── flux.py              # Transient-eddy MSE flux (v'h')
+│   │   ├── storage.py           # MSE storage term dh/dt
+│   │   └── advection.py         # Zonal & meridional MSE advection
+│   ├── smoothing/
+│   │   └── hoskins.py           # Hoskins spectral filter (drives NCL)
+│   ├── tracks/
+│   │   └── processing.py        # TRACK output → .npz arrays
+│   ├── masking/
+│   │   └── masks.py             # Cyclone/anticyclone area masks
+│   ├── integration/
+│   │   └── poleward.py          # Poleward flux integration
+│   ├── assignment/
+│   │   └── flux_assignment.py   # Flux → cyclone category assignment
+│   ├── composites/
+│   │   ├── builder.py           # Cyclone-centred composites (PW & W/m²)
+│   │   └── condensed.py         # Condensed monthly composite file
+│   └── variability/
+│       └── interannual.py       # Interannual variability & confidence bands
+├── ncl/
+│   └── hoskins_filter.ncl       # NCL spectral filter script
+├── notebooks/
+│   └── final_figures.ipynb      # Publication figures (SH & NH composites)
+└── pyproject.toml               # Package metadata & dependencies
 ```
 
 ## Installation
