@@ -49,7 +49,7 @@ mse_cyclone-energetics/
 ├── ncl/
 │   └── hoskins_filter.ncl       # NCL spectral filter script
 ├── notebooks/
-│   └── final_figures.ipynb      # Publication figures (SH & NH composites)
+│   └── final_figures.ipynb      # Publication figures (SH & NH; optional NH land/ocean splits)
 └── pyproject.toml               # Package metadata & dependencies
 ```
 
