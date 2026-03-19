@@ -94,6 +94,16 @@ Each step reads from and writes to user-specified directories.
 Run `cyclone-energetics --help` for full CLI documentation, or
 `cyclone-energetics <command> --help` for per-step options.
 
+### Executing `final_figures.ipynb` on the cluster
+
+Do not run the full notebook on a login node. From the repo root, submit:
+
+```bash
+sbatch run_notebook.sbatch
+```
+
+This job runs `jupyter nbconvert --execute` on a compute node (8 h wall time, 3 h per-cell timeout so the transport figure can finish), writes raster figures to scratch, merges outputs back into `notebooks/final_figures.ipynb` with `OUT_DIR` reset to `"."`, then commits and pushes that notebook if execution succeeds.
+
 ### Example
 
 ```bash
