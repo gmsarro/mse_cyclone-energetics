@@ -10,6 +10,7 @@ import typing_extensions
 import cyclone_energetics.assignment.flux_assignment as flux_assignment
 import cyclone_energetics.composites.builder as composites
 import cyclone_energetics.composites.condensed as condensed_composites
+import cyclone_energetics.composites.land_fraction as land_fraction
 import cyclone_energetics.computation.advection as zonal_advection
 import cyclone_energetics.computation.flux as flux_computation
 import cyclone_energetics.computation.storage as storage_computation
@@ -397,6 +398,138 @@ def build_composites(
         q_directory=q_directory,
         output_directory=output_directory,
         storm_lat=storm_lat,
+        vorticity_directory=vorticity_directory,
+    )
+    print("Done.")
+
+
+@app.command()
+def add_land_fraction(
+    composite_path: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Existing composite NetCDF file to update")
+    ],
+    track_path: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Track .nc file")
+    ],
+    lsm_path: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="ERA5 land-sea mask NetCDF file")
+    ],
+    hemisphere: typing_extensions.Annotated[
+        str, typer.Option(help="Hemisphere: SH or NH")
+    ] = "SH",
+    intensity_min: typing_extensions.Annotated[
+        int, typer.Option(help="Minimum intensity (inclusive)")
+    ] = 1,
+    intensity_max: typing_extensions.Annotated[
+        int, typer.Option(help="Maximum intensity (inclusive)")
+    ] = 5,
+    year_start: typing_extensions.Annotated[
+        int, typer.Option(help="Start year (inclusive)")
+    ] = 2000,
+    year_end: typing_extensions.Annotated[
+        int, typer.Option(help="End year (exclusive)")
+    ] = 2015,
+) -> None:
+    """Step 7b: Add composite land fraction field to an existing composite file."""
+    _setup_logging()
+    storm_lat = (
+        constants.STORM_LAT_SH if hemisphere == "SH"
+        else constants.STORM_LAT_NH
+    )
+    print("Adding land fraction to %s" % composite_path)
+    land_fraction.add_land_fraction_to_composites(
+        composite_path=composite_path,
+        track_path=track_path,
+        lsm_path=lsm_path,
+        hemisphere=hemisphere,
+        intensity_min=intensity_min,
+        intensity_max=intensity_max,
+        storm_lat=storm_lat,
+        year_start=year_start,
+        year_end=year_end,
+    )
+    print("Done.")
+
+
+@app.command()
+def build_land_ocean_composites(
+    track_path: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Track .nc file")
+    ],
+    lsm_path: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="ERA5 land-sea mask NetCDF file")
+    ],
+    integrated_flux_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with integrated flux files")
+    ],
+    vint_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with smoothed vint files")
+    ],
+    dhdt_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with smoothed dh/dt files")
+    ],
+    radiation_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with radiation data")
+    ],
+    z_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with geopotential height data")
+    ],
+    t2m_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with 2-m temperature data")
+    ],
+    q_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Directory with specific humidity data")
+    ],
+    output_directory: typing_extensions.Annotated[
+        pathlib.Path, typer.Option(help="Output directory for land/ocean composites")
+    ],
+    vorticity_directory: typing_extensions.Annotated[
+        typing.Optional[pathlib.Path],
+        typer.Option(help="Directory with filtered vorticity files (VO850_YYYY.nc)")
+    ] = None,
+    hemisphere: typing_extensions.Annotated[
+        str, typer.Option(help="Hemisphere: SH or NH")
+    ] = "NH",
+    intensity_min: typing_extensions.Annotated[
+        int, typer.Option(help="Minimum intensity (inclusive)")
+    ] = 1,
+    intensity_max: typing_extensions.Annotated[
+        int, typer.Option(help="Maximum intensity (inclusive)")
+    ] = 5,
+    year_start: typing_extensions.Annotated[
+        int, typer.Option(help="Start year (inclusive)")
+    ] = 2000,
+    year_end: typing_extensions.Annotated[
+        int, typer.Option(help="End year (exclusive)")
+    ] = 2015,
+) -> None:
+    """Step 7c: Build separate composites for land vs ocean cyclone centres."""
+    _setup_logging()
+    storm_lat = (
+        constants.STORM_LAT_SH if hemisphere == "SH"
+        else constants.STORM_LAT_NH
+    )
+    print(
+        "Building land/ocean composites: %s intensity=[%s,%s]"
+        % (hemisphere, intensity_min, intensity_max)
+    )
+    land_fraction.build_land_ocean_composites(
+        year_start=year_start,
+        year_end=year_end,
+        intensity_min=intensity_min,
+        intensity_max=intensity_max,
+        track_path=track_path,
+        lsm_path=lsm_path,
+        integrated_flux_directory=integrated_flux_directory,
+        vint_directory=vint_directory,
+        dhdt_directory=dhdt_directory,
+        radiation_directory=radiation_directory,
+        z_directory=z_directory,
+        t2m_directory=t2m_directory,
+        q_directory=q_directory,
+        output_directory=output_directory,
+        storm_lat=storm_lat,
+        hemisphere=hemisphere,
         vorticity_directory=vorticity_directory,
     )
     print("Done.")

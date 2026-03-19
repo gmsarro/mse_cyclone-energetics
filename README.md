@@ -42,7 +42,8 @@ mse_cyclone-energetics/
 │   │   └── flux_assignment.py   # Flux → cyclone category assignment
 │   ├── composites/
 │   │   ├── builder.py           # Cyclone-centred composites (PW & W/m²)
-│   │   └── condensed.py         # Condensed monthly composite file
+│   │   ├── condensed.py         # Condensed monthly composite file
+│   │   └── land_fraction.py     # Land-fraction field & land/ocean split composites
 │   └── variability/
 │       └── interannual.py       # Interannual variability & confidence bands
 ├── ncl/
@@ -84,7 +85,9 @@ Each step reads from and writes to user-specified directories.
 | Masking     | 4    | `create-masks`        | `masking.masks`                  |
 | Integration | 5    | `integrate-fluxes`    | `integration.poleward`           |
 | Assignment  | 6    | `assign-fluxes`       | `assignment.flux_assignment`     |
-| Composites  | 7    | `build-composites`    | `composites.builder`             |
+| Composites  | 7a   | `build-composites`    | `composites.builder`             |
+| Composites  | 7b   | `add-land-fraction`   | `composites.land_fraction`       |
+| Composites  | 7c   | `build-land-ocean-composites` | `composites.land_fraction` |
 | Composites  | 8    | `condense-composites` | `composites.condensed`           |
 | Variability | 9    | `compute-variability` | `variability.interannual`        |
 

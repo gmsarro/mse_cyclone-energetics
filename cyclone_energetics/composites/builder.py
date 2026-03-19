@@ -455,6 +455,10 @@ def build_cyclone_composites(
     storm_lat: npt.NDArray,
     vorticity_directory: typing.Optional[pathlib.Path] = None,
     lat_band_half_width: float = _LAT_BAND_HALF_WIDTH,
+    snapshot_filter: typing.Optional[
+        typing.Callable[[float, float], bool]
+    ] = None,
+    output_suffix: typing.Optional[str] = None,
 ) -> None:
     output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -577,6 +581,9 @@ def build_cyclone_composites(
         for si in snap_indices:
             lat0 = float(lat_arr[si])
             lon0 = float(lon_arr[si])
+
+            if snapshot_filter is not None and not snapshot_filter(lat0, lon0):
+                continue
             time_index = int(local_t_arr[si])
 
             pw_ok = False
@@ -676,9 +683,13 @@ def build_cyclone_composites(
             vo_interp[m] = spl(y_interp, y_interp)
     wm2_comps["VO"] = vo_interp
 
-    out_nc = output_directory / ("Composites_%s_%s_noleap.nc" % (tag, hemisphere))
+    suffix_part = "_%s" % output_suffix if output_suffix else ""
+    out_nc = output_directory / (
+        "Composites_%s_%s%s_noleap.nc" % (tag, hemisphere, suffix_part)
+    )
     out_csv = output_directory / (
-        "Composites_%s_%s_noleap_center_samples.csv" % (tag, hemisphere)
+        "Composites_%s_%s%s_noleap_center_samples.csv"
+        % (tag, hemisphere, suffix_part)
     )
 
     data_vars: typing.Dict[str, typing.Tuple[typing.Tuple[str, ...], npt.NDArray]] = {}
