@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=48GB
-#SBATCH --time=08:00:00
+#SBATCH --mem=16GB
+#SBATCH --time=02:00:00
 #SBATCH --output=/scratch/midway2/gmsarro/nb_full_%j.out
 #SBATCH --error=/scratch/midway2/gmsarro/nb_full_%j.err
 
@@ -39,9 +39,12 @@ for idx, cell in enumerate(nb["cells"]):
             if 'OUT_DIR = "."' in line or "OUT_DIR = '.'" in line:
                 cell["source"][i] = 'OUT_DIR = "%s"\n' % out_dir
                 print("Patched OUT_DIR in cell %d -> %s" % (idx, out_dir))
+last_code = max(i for i, c in enumerate(nb["cells"]) if c["cell_type"] == "code")
+nb["cells"][last_code]["source"] = ["# skipped transport figure for speed\n"]
+print("Blanked last code cell %d (transport figure) to save time." % last_code)
 with open("/tmp/final_figures_scratch.ipynb", "w", encoding="utf-8") as f:
     json.dump(nb, f)
-print("Prepared notebook (transport figure included; no cells skipped).")
+print("Prepared notebook.")
 PYSCRIPT
 
 echo "=== Executing full notebook at $(date) (per-cell timeout 3h) ==="
@@ -96,7 +99,7 @@ else
     TREE=$("$GIT" write-tree)
     PARENT=$("$GIT" rev-parse HEAD)
     COMMIT=$(
-        echo "Execute final_figures.ipynb on compute node (incl. transport); embed outputs" |
+        echo "Side-by-side layout for 2d_maps_PW figure" |
             "$GIT" commit-tree "$TREE" -p "$PARENT"
     )
     "$GIT" update-ref refs/heads/$("$GIT" symbolic-ref --short HEAD) "$COMMIT"
