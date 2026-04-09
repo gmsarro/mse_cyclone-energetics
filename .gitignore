@@ -19,15 +19,13 @@ build/
 *.err
 *.log
 *.sbatch
-!run_notebook.sbatch
 
-# Local validation (not for public repo)
-tests/validate_numerics.py
-run_nh_composites.py
-run_te_one_year.py
-verify_numerical.py
+# Local scripts (not for public repo)
+run_notebook_wait.sh
+last_nb_jobid.txt
 
 # IDE / OS
 .vscode/
 .idea/
 .DS_Store
+.cursor/
