@@ -14,6 +14,9 @@ build/
 *.pdf
 *.png
 
+# But keep notebook figures for web visibility
+!notebooks/*.png
+
 # Cluster jobs
 *.out
 *.err
