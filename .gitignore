@@ -13,9 +13,8 @@ build/
 *.nc
 *.pdf
 *.png
-
-# But keep notebook figures for web visibility
-!notebooks/*.png
+notebooks/*.png
+notebooks/*.pdf
 
 # Cluster jobs
 *.out
