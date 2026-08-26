@@ -250,8 +250,89 @@ def figure_r3_shf_anomaly_sh():
     print("saved", out)
 
 
+def figure_r4_shf_remainder_nh():
+    """NH DJF-JJA change of the local surface heat flux (W m-2).
+
+    Maps of the total field, the part sampled inside cyclone+anticyclone
+    masks, and the remainder (outside all tracked features), plus their NH
+    zonal means. Same sampled fields (intensity cut 1 CVU) used for the
+    manuscript budgets, before poleward integration.
+    """
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+
+    nc = f"{ROOT}/cyclone_centered/WATTS_Cyclones_Sampled_Poleward_Fluxes_0.225.nc"
+    with xr.open_dataset(nc) as d:
+        lat = d["lat"].values
+        lon = d["lon"].values
+        djf = [11, 0, 1]
+        jja = [5, 6, 7]
+
+        def seas(v):
+            x = d[v][0].values
+            return np.nanmean(x[djf], axis=0) - np.nanmean(x[jja], axis=0)
+
+        tot = seas("F_Shf_final")
+        feat = seas("F_Shf_final_cycl") + seas("F_Shf_final_ant")
+    rem = tot - feat
+
+    lon_p = np.where(lon > 180, lon - 360, lon)
+    order = np.argsort(lon_p)
+    lon_p = lon_p[order]
+
+    levels = np.concatenate([np.arange(-100, -9, 10), np.arange(10, 101, 10)])
+
+    fig = plt.figure(figsize=(13.5, 8.5))
+    gs = fig.add_gridspec(2, 2, hspace=0.30, wspace=0.14,
+                          left=0.06, right=0.89, top=0.88, bottom=0.07)
+    specs = [
+        (gs[0, 0], tot, "(a) Total $\\Delta$SHF (DJF$-$JJA)"),
+        (gs[0, 1], feat, "(b) Cyclone + anticyclone part"),
+        (gs[1, 0], rem, "(c) Remainder = (a) $-$ (b)"),
+    ]
+    for spec, field, title in specs:
+        ax = fig.add_subplot(spec, projection=ccrs.PlateCarree())
+        ax.set_extent([-180, 180, 0, 90], crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.COASTLINE.with_scale("110m"), linewidth=0.6)
+        cf = ax.contourf(lon_p, lat, field[:, order], levels=levels,
+                         cmap=CMAP, extend="both",
+                         transform=ccrs.PlateCarree())
+        ax.set_title(title, fontsize=13)
+        ax.set_xticks(np.arange(-180, 181, 60), crs=ccrs.PlateCarree())
+        ax.set_yticks(np.arange(0, 81, 20), crs=ccrs.PlateCarree())
+        ax.tick_params(labelsize=8)
+    cax = fig.add_axes([0.905, 0.55, 0.015, 0.33])
+    fig.colorbar(cf, cax=cax).set_label("W m$^{-2}$")
+
+    axz = fig.add_subplot(gs[1, 1])
+    nh = lat > 0
+    for field, label, color in [
+        (tot, "total", "black"),
+        (feat, "cyclones + anticyclones", "crimson"),
+        (rem, "remainder", "royalblue"),
+    ]:
+        axz.plot(np.nanmean(field, axis=1)[nh], lat[nh], color=color,
+                 lw=1.8, label=label)
+    axz.axvline(0, color="0.6", lw=0.8)
+    axz.set_ylim(0, 90)
+    axz.set_xlabel("W m$^{-2}$")
+    axz.set_ylabel("latitude")
+    axz.set_title("(d) NH zonal mean of (a)-(c)", fontsize=13)
+    axz.legend(frameon=False, fontsize=10, loc="lower left")
+
+    fig.suptitle(
+        "NH DJF$-$JJA change of the surface heat flux, split by feature masks",
+        y=0.96, fontweight="bold", fontsize=15,
+    )
+    out = os.path.join(OUT_DIR, "R4_SHF_remainder_NH.png")
+    fig.savefig(out, dpi=300, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    print("saved", out)
+
+
 if __name__ == "__main__":
     figure_r1_smoothing()
     figure_r2_za_composite_nh()
     figure_r3_shf_anomaly_sh()
+    figure_r4_shf_remainder_nh()
     print("all reviewer figures done")
