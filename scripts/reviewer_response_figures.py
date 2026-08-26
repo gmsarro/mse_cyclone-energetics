@@ -34,87 +34,45 @@ CMAP = matplotlib.colors.LinearSegmentedColormap.from_list(
 )
 
 
-def _annual_mean_div_vm(year=2000, filtered=True):
-    """Time mean of the 6-hourly divergence over all steps of one year.
-
-    Cached to a small netCDF because it reads ~6 GB of monthly files.
-    """
-    tag = "filtered" if filtered else "raw"
-    cache = os.path.join(OUT_DIR, f"annmean_div_vm_{tag}_{year}.nc")
-    if os.path.exists(cache):
-        with xr.open_dataset(cache) as d:
-            return d["TE_annmean"].values, d["latitude"].values, d["longitude"].values
-
-    total = None
-    nsteps = 0
-    for month in range(1, 13):
-        if filtered:
-            path = f"{ROOT}/smoothed_div_VM/Aaron_VM_{year}_{month:02d}_filtered.nc"
-            var = "TE_filtered"
-        else:
-            path = f"{ROOT}/VM_adj_ERA5/Aaron_VM_{year}_{month:02d}.nc"
-            var = "TE"
-        with xr.open_dataset(path) as d:
-            x = d[var].values
-            lat = d["latitude"].values
-            lon = d["longitude"].values
-        s = np.nansum(x, axis=0, dtype=np.float64)
-        total = s if total is None else total + s
-        nsteps += x.shape[0]
-        print(f"  month {month:02d}: {x.shape[0]} steps")
-    mean = (total / nsteps).astype(np.float32)
-    xr.Dataset(
-        {"TE_annmean": (("latitude", "longitude"), mean)},
-        coords={"latitude": lat, "longitude": lon},
-    ).to_netcdf(cache)
-    return mean, lat, lon
-
-
-def _mayer_tediv_annmean(year=2000):
-    """Annual mean of the Mayer et al. (2021) mass-consistent TEDIV (W m-2).
-
-    Downloaded from the CDS record `derived-reanalysis-energy-moisture-budget`
-    (DOI 10.24381/cds.c2451f6b), one netCDF per month.
-    """
-    fields = []
-    for month in range(1, 13):
-        path = (f"{ROOT}/mayer_budget/monthly/"
-                f"total-energy-flux-divergence_monthly_{year}{month:02d}_v1.0.nc")
-        with xr.open_dataset(path) as d:
-            fields.append(d["tediv"][0].values)
-            lat = d["latitude"].values
-            lon = d["longitude"].values
-    return np.mean(fields, axis=0), lat, lon
-
-
 def figure_r1_smoothing():
-    """Raw vs Hoskins-filtered 6-hourly divergence of meridional MSE flux.
+    """Raw vs Hoskins-filtered 6-hourly total energy flux divergence.
 
-    Note: the raw and filtered files store latitude in opposite order, so
-    each field is plotted with the coordinates of its own dataset.
+    Shows the exact field used in the manuscript budget (from which SHF is
+    diagnosed as a residual): the full (zonal + meridional) divergence of
+    the vertically integrated energy flux, composed of the 6-hourly ERA5
+    vertical-integral products p85.162 (geopotential flux divergence),
+    p84.162 (moisture flux divergence, times Lv) and p83.162 (thermal
+    energy flux divergence), as in cyclone_energetics.integration.poleward.
+    Maps and time series are weighted by cos(lat) to remove the metric
+    amplification at high latitudes. Note: the raw and filtered files store
+    latitude in opposite order, so each field uses its own coordinates.
     """
     import cartopy.crs as ccrs
     import cartopy.feature as cfeature
 
-    raw = xr.open_dataset(f"{ROOT}/VM_adj_ERA5/Aaron_VM_2000_01.nc")
-    smo = xr.open_dataset(f"{ROOT}/smoothed_div_VM/Aaron_VM_2000_01_filtered.nc")
+    LV = 2.501e6  # cyclone_energetics.constants.LATENT_HEAT_VAPORIZATION
+
+    raw = xr.open_dataset(
+        "/project2/tas1/abacus/data1/tas/archive/Reanalysis/ERA5/vint/"
+        "era5_vint_2000_01.6hrly.nc")
+    smo = xr.open_dataset(f"{ROOT}/smoothed_vint/era5_vint_2000_01_filtered.nc")
+
+    def total_div(ds, suffix=""):
+        return (ds["p85.162" + suffix] + ds["p84.162" + suffix] * LV
+                + ds["p83.162" + suffix])
+
+    raw_tot = total_div(raw)
+    smo_tot = total_div(smo, "_filtered")
 
     t0 = 0
-    ann, lat_ann, lon_ann = _annual_mean_div_vm(2000, filtered=True)
-    may, lat_may, lon_may = _mayer_tediv_annmean(2000)
-
-    # cos(lat) weighting (flux form): removes the metric 1/cos(lat)
-    # amplification at high latitudes so tropics and poles share one scale.
-    cw_ann = np.cos(np.deg2rad(lat_ann))[:, None]
-    cw_may = np.cos(np.deg2rad(lat_may))[:, None]
-    ann_w = ann * cw_ann
-    may_w = may * cw_may
 
     # Time series at a NH stormtrack point (45N, 180E), selected on each
-    # dataset's own coordinates.
-    ts_raw = raw["TE"].sel(latitude=45.0, longitude=180.0, method="nearest").values
-    ts_smo = smo["TE_filtered"].sel(latitude=45.0, longitude=180.0,
-                                    method="nearest").values
+    # dataset's own coordinates and weighted by cos(45).
+    cos45 = np.cos(np.deg2rad(45.0))
+    ts_raw = raw_tot.sel(latitude=45.0, longitude=180.0,
+                         method="nearest").values * cos45
+    ts_smo = smo_tot.sel(latitude=45.0, longitude=180.0,
+                         method="nearest").values * cos45
     time_days = np.arange(ts_raw.size) * 0.25
 
     def _to_180(lon):
@@ -122,79 +80,48 @@ def figure_r1_smoothing():
         order = np.argsort(lon_p)
         return lon_p[order], order
 
-    fig = plt.figure(figsize=(13, 13))
-    gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.15, 0.65],
-                          hspace=0.40, wspace=0.14,
-                          left=0.06, right=0.90, top=0.95, bottom=0.05)
+    fig = plt.figure(figsize=(13, 9))
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.25, 0.85],
+                          hspace=0.35, wspace=0.14,
+                          left=0.06, right=0.90, top=0.92, bottom=0.08)
 
-    levels_snap = np.arange(-8000, 8001, 800)
-    snap_panels = [
-        (gs[0, 0], raw["TE"][t0].values, raw["latitude"].values,
+    levels_snap = np.arange(-2500, 2501, 250)
+    levels_snap = levels_snap[levels_snap != 0]
+    panels = [
+        (gs[0, 0], raw_tot[t0].values, raw["latitude"].values,
          raw["longitude"].values,
-         "(a) $\\nabla\\cdot\\langle vm\\rangle$ 2000-01-01 00UTC\n"
-         "raw ERA5 (0.25$^\\circ$)"),
-        (gs[0, 1], smo["TE_filtered"][t0].values, smo["latitude"].values,
+         "(a) $\\cos\\phi\\,\\nabla\\cdot\\langle\\mathbf{v}m\\rangle$ "
+         "2000-01-01 00UTC\nraw ERA5 (0.25$^\\circ$)"),
+        (gs[0, 1], smo_tot[t0].values, smo["latitude"].values,
          smo["longitude"].values,
-         "(b) $\\nabla\\cdot\\langle vm\\rangle$ 2000-01-01 00UTC\n"
-         "Hoskins-filtered ($n_0=60$, $r=1$)"),
+         "(b) $\\cos\\phi\\,\\nabla\\cdot\\langle\\mathbf{v}m\\rangle$ "
+         "2000-01-01 00UTC\nHoskins-filtered ($n_0=60$, $r=1$)"),
     ]
-    for spec, field, lat, lon, title in snap_panels:
+    for spec, field, lat, lon, title in panels:
         lon_p, order = _to_180(lon)
+        field_w = field[:, order] * np.cos(np.deg2rad(lat))[:, None]
         ax = fig.add_subplot(spec, projection=ccrs.PlateCarree())
         ax.set_extent([-180, 180, -88, 88], crs=ccrs.PlateCarree())
         ax.add_feature(cfeature.COASTLINE.with_scale("110m"),
                        linewidth=0.6, edgecolor="0.25")
-        cf_snap = ax.contourf(lon_p, lat, field[:, order], levels=levels_snap,
+        cf_snap = ax.contourf(lon_p, lat, field_w, levels=levels_snap,
                               cmap=CMAP, extend="both",
                               transform=ccrs.PlateCarree())
         ax.set_title(title, fontsize=11)
         ax.set_xticks(np.arange(-180, 181, 60), crs=ccrs.PlateCarree())
         ax.set_yticks(np.arange(-80, 81, 40), crs=ccrs.PlateCarree())
         ax.tick_params(labelsize=8)
-    cax = fig.add_axes([0.915, 0.78, 0.015, 0.16])
+    cax = fig.add_axes([0.915, 0.55, 0.015, 0.32])
     fig.colorbar(cf_snap, cax=cax).set_label("W m$^{-2}$")
 
-    # Annual means: ours (meridional MSE flux divergence, filtered) next to
-    # the Mayer et al. (2021) mass-consistent total energy flux divergence.
-    # Separate colorbars: the meridional-only divergence is locally larger
-    # because the zonal flux divergence largely compensates it.
-    ann_panels = [
-        (gs[1, 0], ann_w, lat_ann, lon_ann,
-         "(c) $\\cos\\phi\\;\\nabla\\cdot\\langle vm\\rangle$ annual mean 2000\n"
-         "Hoskins-filtered, all 6-hourly steps"),
-        (gs[1, 1], may_w, lat_may, lon_may,
-         "(d) $\\cos\\phi\\,\\cdot$ TEDIV annual mean 2000\n"
-         "Mayer et al. (2021), mass-consistent"),
-    ]
-    for spec, field, lat, lon, title in ann_panels:
-        lon_p, order = _to_180(lon)
-        inner = np.abs(lat) < 85.0
-        vmax = np.nanpercentile(np.abs(field[inner]), 99)
-        step = float(np.round(vmax / 9.0, -int(np.floor(np.log10(vmax / 9.0)))))
-        levels = np.arange(-9.0 * step, 9.0 * step + step / 2.0, step)
-        ax = fig.add_subplot(spec, projection=ccrs.PlateCarree())
-        ax.set_extent([-180, 180, -88, 88], crs=ccrs.PlateCarree())
-        ax.add_feature(cfeature.COASTLINE.with_scale("110m"),
-                       linewidth=0.6, edgecolor="0.25")
-        cf = ax.contourf(lon_p, lat, field[:, order], levels=levels,
-                         cmap=CMAP, extend="both",
-                         transform=ccrs.PlateCarree())
-        ax.set_title(title, fontsize=11)
-        ax.set_xticks(np.arange(-180, 181, 60), crs=ccrs.PlateCarree())
-        ax.set_yticks(np.arange(-80, 81, 40), crs=ccrs.PlateCarree())
-        ax.tick_params(labelsize=8)
-        cb = fig.colorbar(cf, ax=ax, orientation="horizontal",
-                          fraction=0.055, pad=0.14, aspect=35)
-        cb.set_label("W m$^{-2}$", fontsize=9)
-        cb.ax.tick_params(labelsize=8)
-
-    ax = fig.add_subplot(gs[2, :])
+    ax = fig.add_subplot(gs[1, :])
     ax.plot(time_days, ts_raw, color="0.6", lw=0.8, label="raw")
     ax.plot(time_days, ts_smo, color="crimson", lw=1.6, label="Hoskins-filtered")
     ax.set_xlabel("days (January 2000)")
     ax.set_ylabel("W m$^{-2}$")
     ax.set_title(
-        "(e) 6-hourly $\\nabla\\cdot\\langle vm\\rangle$ at 45$^\\circ$N, 180$^\\circ$E",
+        "(c) 6-hourly $\\cos\\phi\\,\\nabla\\cdot\\langle\\mathbf{v}m\\rangle$ "
+        "at 45$^\\circ$N, 180$^\\circ$E",
         fontsize=11,
     )
     ax.legend(frameon=False)
