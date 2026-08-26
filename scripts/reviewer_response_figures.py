@@ -34,64 +34,127 @@ CMAP = matplotlib.colors.LinearSegmentedColormap.from_list(
 )
 
 
+def _annual_mean_div_vm(year=2000):
+    """Time mean of the raw 6-hourly divergence over all steps of one year.
+
+    Cached to a small netCDF because it reads ~6 GB of monthly files.
+    """
+    cache = os.path.join(OUT_DIR, f"annmean_div_vm_{year}.nc")
+    if os.path.exists(cache):
+        with xr.open_dataset(cache) as d:
+            return d["TE_annmean"].values, d["latitude"].values, d["longitude"].values
+
+    total = None
+    nsteps = 0
+    for month in range(1, 13):
+        with xr.open_dataset(f"{ROOT}/VM_adj_ERA5/Aaron_VM_{year}_{month:02d}.nc") as d:
+            x = d["TE"].values
+            lat = d["latitude"].values
+            lon = d["longitude"].values
+        s = np.nansum(x, axis=0, dtype=np.float64)
+        total = s if total is None else total + s
+        nsteps += x.shape[0]
+        print(f"  month {month:02d}: {x.shape[0]} steps")
+    mean = (total / nsteps).astype(np.float32)
+    xr.Dataset(
+        {"TE_annmean": (("latitude", "longitude"), mean)},
+        coords={"latitude": lat, "longitude": lon},
+    ).to_netcdf(cache)
+    return mean, lat, lon
+
+
 def figure_r1_smoothing():
-    """Raw vs Hoskins-filtered 6-hourly divergence of meridional MSE flux."""
+    """Raw vs Hoskins-filtered 6-hourly divergence of meridional MSE flux.
+
+    Note: the raw and filtered files store latitude in opposite order, so
+    each field is plotted with the coordinates of its own dataset.
+    """
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+
     raw = xr.open_dataset(f"{ROOT}/VM_adj_ERA5/Aaron_VM_2000_01.nc")
     smo = xr.open_dataset(f"{ROOT}/smoothed_div_VM/Aaron_VM_2000_01_filtered.nc")
 
-    raw_te = raw["TE"]
-    smo_te = smo["TE_filtered"]
-
     t0 = 0
-    lat = raw["latitude"].values
-    lon = raw["longitude"].values
+    ann, lat_ann, lon_ann = _annual_mean_div_vm(2000)
 
-    # Time series at a NH stormtrack point (45N, 180E).
-    ilat = int(np.argmin(np.abs(lat - 45.0)))
-    ilon = int(np.argmin(np.abs(lon - 180.0)))
-    ts_raw = raw_te[:, ilat, ilon].values
-    ts_smo = smo_te[:, ilat, ilon].values
+    # Time series at a NH stormtrack point (45N, 180E), selected on each
+    # dataset's own coordinates.
+    ts_raw = raw["TE"].sel(latitude=45.0, longitude=180.0, method="nearest").values
+    ts_smo = smo["TE_filtered"].sel(latitude=45.0, longitude=180.0,
+                                    method="nearest").values
     time_days = np.arange(ts_raw.size) * 0.25
 
-    fig = plt.figure(figsize=(13, 9))
-    gs = fig.add_gridspec(2, 2, height_ratios=[1.4, 1.0], hspace=0.32, wspace=0.12)
+    def _to_180(lon):
+        lon_p = np.where(lon > 180, lon - 360, lon)
+        order = np.argsort(lon_p)
+        return lon_p[order], order
 
-    levels = np.arange(-8000, 8001, 800)
-    for k, (field, title) in enumerate([
-        (raw_te[t0].values, "raw ERA5 (0.25$^\\circ$)"),
-        (smo_te[t0].values, "Hoskins-filtered ($n_0=60$, $r=1$)"),
-    ]):
-        ax = fig.add_subplot(gs[0, k])
-        cf = ax.contourf(lon, lat, field, levels=levels, cmap=CMAP, extend="both")
-        ax.set_title(
-            f"({chr(97 + k)}) $\\nabla\\cdot\\langle vm\\rangle$ "
-            f"2000-01-01 00UTC\n{title}",
-            fontsize=11,
-        )
-        ax.set_xlabel("longitude")
-        if k == 0:
-            ax.set_ylabel("latitude")
-    cax = fig.add_axes([0.92, 0.55, 0.015, 0.32])
-    fig.colorbar(cf, cax=cax).set_label("W m$^{-2}$")
+    fig = plt.figure(figsize=(13, 12))
+    gs = fig.add_gridspec(3, 2, height_ratios=[1.0, 1.0, 0.75],
+                          hspace=0.38, wspace=0.12,
+                          left=0.06, right=0.90, top=0.94, bottom=0.06)
 
-    ax = fig.add_subplot(gs[1, :])
+    levels_snap = np.arange(-8000, 8001, 800)
+    panels = [
+        (gs[0, 0], raw["TE"][t0].values, raw["latitude"].values,
+         raw["longitude"].values, levels_snap,
+         "(a) $\\nabla\\cdot\\langle vm\\rangle$ 2000-01-01 00UTC\n"
+         "raw ERA5 (0.25$^\\circ$)"),
+        (gs[0, 1], smo["TE_filtered"][t0].values, smo["latitude"].values,
+         smo["longitude"].values, levels_snap,
+         "(b) $\\nabla\\cdot\\langle vm\\rangle$ 2000-01-01 00UTC\n"
+         "Hoskins-filtered ($n_0=60$, $r=1$)"),
+    ]
+
+    # Annual-mean colorbar limits from the 99th percentile between 70S-70N
+    # (the Antarctic coastal band would otherwise set the scale), rounded up
+    # to the nearest 500 W m-2.
+    inner = np.abs(lat_ann) < 70.0
+    vmax_ann = np.nanpercentile(np.abs(ann[inner]), 99)
+    vmax_ann = 500.0 * np.ceil(vmax_ann / 500.0)
+    levels_ann = np.arange(-vmax_ann, vmax_ann + 1.0, 500.0)
+    panels.append(
+        (gs[1, :], ann, lat_ann, lon_ann, levels_ann,
+         "(c) $\\nabla\\cdot\\langle vm\\rangle$ annual mean 2000\n"
+         "raw, all 6-hourly steps"))
+
+    handles = []
+    for spec, field, lat, lon, levels, title in panels:
+        lon_p, order = _to_180(lon)
+        ax = fig.add_subplot(spec, projection=ccrs.PlateCarree())
+        ax.set_extent([-180, 180, -88, 88], crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.COASTLINE.with_scale("110m"),
+                       linewidth=0.6, edgecolor="0.25")
+        handles.append(ax.contourf(lon_p, lat, field[:, order], levels=levels,
+                                   cmap=CMAP, extend="both",
+                                   transform=ccrs.PlateCarree()))
+        ax.set_title(title, fontsize=11)
+        ax.set_xticks(np.arange(-180, 181, 60), crs=ccrs.PlateCarree())
+        ax.set_yticks(np.arange(-80, 81, 40), crs=ccrs.PlateCarree())
+        ax.tick_params(labelsize=8)
+    cax = fig.add_axes([0.915, 0.70, 0.015, 0.22])
+    fig.colorbar(handles[0], cax=cax).set_label("W m$^{-2}$")
+    cax2 = fig.add_axes([0.915, 0.40, 0.015, 0.22])
+    fig.colorbar(handles[2], cax=cax2).set_label("W m$^{-2}$")
+
+    ax = fig.add_subplot(gs[2, :])
     ax.plot(time_days, ts_raw, color="0.6", lw=0.8, label="raw")
     ax.plot(time_days, ts_smo, color="crimson", lw=1.6, label="Hoskins-filtered")
     ax.set_xlabel("days (January 2000)")
     ax.set_ylabel("W m$^{-2}$")
     ax.set_title(
-        "6-hourly $\\nabla\\cdot\\langle vm\\rangle$ at 45$^\\circ$N, 180$^\\circ$E",
+        "(d) 6-hourly $\\nabla\\cdot\\langle vm\\rangle$ at 45$^\\circ$N, 180$^\\circ$E",
         fontsize=11,
     )
     ax.legend(frameon=False)
-    ax.set_title("(c) " + ax.get_title(), fontsize=11)
 
     out = os.path.join(OUT_DIR, "R1_div_vm_raw_vs_smoothed.png")
     fig.savefig(out, dpi=300, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     raw.close()
     smo.close()
-    print("saved", out)
+    print("saved", out, "| annual-mean colorbar +/-", vmax_ann, "W m-2")
 
 
 def _weight_cube(y_grid, stormtrack_lat12, nx):
