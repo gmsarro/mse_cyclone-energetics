@@ -1,6 +1,6 @@
 """Figures for the response to reviewers (not part of the manuscript).
 
-R1: raw vs Hoskins-filtered 6-hourly meridional MSE flux divergence.
+R1: raw vs Hoskins-filtered 6-hourly total energy flux divergence.
 R2: NH cyclone-centered annual-mean zonal MSE advection composite.
 R3: SH cyclone-centered annual-mean SHF composite and its zonal anomaly.
 
@@ -44,7 +44,9 @@ def figure_r1_smoothing():
     p84.162 (moisture flux divergence, times Lv) and p83.162 (thermal
     energy flux divergence), as in cyclone_energetics.integration.poleward.
     Maps and time series are weighted by cos(lat) to remove the metric
-    amplification at high latitudes. Note: the raw and filtered files store
+    amplification at high latitudes. The stored filtered fields were produced
+    with the Hoskins filter at n0=27, r=1 (the parameters used for the
+    divergence in the manuscript). Note: the raw and filtered files store
     latitude in opposite order, so each field uses its own coordinates.
     """
     import cartopy.crs as ccrs
@@ -95,7 +97,7 @@ def figure_r1_smoothing():
         (gs[0, 1], smo_tot[t0].values, smo["latitude"].values,
          smo["longitude"].values,
          "(b) $\\cos\\phi\\,\\nabla\\cdot\\langle\\mathbf{v}m\\rangle$ "
-         "2000-01-01 00UTC\nHoskins-filtered ($n_0=60$, $r=1$)"),
+         "2000-01-01 00UTC\nHoskins-filtered ($n_0=27$, $r=1$)"),
     ]
     for spec, field, lat, lon, title in panels:
         lon_p, order = _to_180(lon)
