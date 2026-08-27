@@ -82,10 +82,10 @@ def figure_r1_smoothing():
         order = np.argsort(lon_p)
         return lon_p[order], order
 
-    fig = plt.figure(figsize=(13, 9))
+    fig = plt.figure(figsize=(13, 6.0))
     gs = fig.add_gridspec(2, 2, height_ratios=[1.25, 0.85],
-                          hspace=0.35, wspace=0.14,
-                          left=0.06, right=0.90, top=0.92, bottom=0.08)
+                          hspace=0.25, wspace=0.07,
+                          left=0.055, right=0.90, top=0.93, bottom=0.09)
 
     levels_snap = np.arange(-2500, 2501, 250)
     levels_snap = levels_snap[levels_snap != 0]
@@ -113,7 +113,7 @@ def figure_r1_smoothing():
         ax.set_xticks(np.arange(-180, 181, 60), crs=ccrs.PlateCarree())
         ax.set_yticks(np.arange(-80, 81, 40), crs=ccrs.PlateCarree())
         ax.tick_params(labelsize=8)
-    cax = fig.add_axes([0.915, 0.55, 0.015, 0.32])
+    cax = fig.add_axes([0.907, 0.52, 0.013, 0.38])
     fig.colorbar(cf_snap, cax=cax).set_label("W m$^{-2}$")
 
     ax = fig.add_subplot(gs[1, :])
