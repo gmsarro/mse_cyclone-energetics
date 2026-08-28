@@ -3,6 +3,8 @@
 R1: raw vs Hoskins-filtered 6-hourly total energy flux divergence.
 R2: NH cyclone-centered annual-mean zonal MSE advection composite.
 R3: SH cyclone-centered annual-mean SHF composite and its zonal anomaly.
+R4: NH DJF-JJA SHF change split by feature masks.
+R5: SHF seasonality, constant vs monthly stormtrack-latitude normalization.
 
 All inputs are pre-computed netCDF files; this script only plots.
 """
@@ -14,6 +16,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.colors
+import matplotlib.patches
 import matplotlib.pyplot as plt
 import numpy as np
 import xarray as xr
@@ -372,9 +375,145 @@ def figure_r4_shf_remainder_nh():
     print("saved", out)
 
 
+def figure_r5_shf_normalization():
+    """Why term ratios differ between Fig 3b and Fig 3c-f, shown for SHF.
+
+    Panels c-f of manuscript Fig 3 plot the exact normalized seasonal change
+    D(f_c T_c^L)/f_hat of Eq 7 -- the Eq S15 approximation is NOT applied
+    there.  The ratios nevertheless differ from panel b because the
+    normalization is not one constant: each monthly value is normalized by
+    2 pi a cos(phi_st(m)) f_hat at the *monthly* stormtrack latitude (and the
+    intense panels use the stormtrack of the intense category) before the
+    winter-minus-summer difference is formed.  This function reproduces both
+    computations exactly as in the manuscript notebook and also shows the
+    Eq 8 / S15 footprint-efficiency split and the neglected covariance term.
+    """
+    from scipy import interpolate
+
+    nc_flux = f"{ROOT}/cyclone_centered/WITH_INT_Cyclones_Sampled_Poleward_Fluxes_0.225.nc"
+    nc_cyc = f"{ROOT}/track/final/cyclonic_intensity.nc"
+    half_win = int(25600 / 2 / 9)
+
+    with xr.open_dataset(nc_flux) as f:
+        lat = f["lat"].values
+
+        def _cyc(name, weak):
+            v = f[name].values
+            return (v[0] - v[5]) if weak else v[5]
+
+        shf_zon = {}
+        fte_zon = {}
+        for weak in (True, False):
+            tot = _cyc("tot_energy_final_cycl", weak) + _cyc("F_Dhdt_final_cycl", weak)
+            shf = tot - _cyc("F_Olr_final_cycl", weak) - _cyc("F_Swabs_final_cycl", weak)
+            shf_zon[weak] = np.nanmean(shf, axis=2)
+        fte_total_zon = np.nanmean(f["F_TE_final"][0].values, axis=2)
+        fte_int_zon = np.nanmean(f["F_TE_final"][5].values, axis=2)
+        same_track_field = bool(np.allclose(
+            np.nan_to_num(fte_total_zon), np.nan_to_num(fte_int_zon)))
+    with xr.open_dataset(nc_cyc) as f:
+        ci = f["cycl_int_final"].values  # (6, 12, lat, lon)
+        foot_zon = {True: np.nanmean(ci[0] - ci[5], axis=2),
+                    False: np.nanmean(ci[5], axis=2)}
+
+    xd = np.arange(lat.size, dtype=float)
+    x_hi = np.linspace(0, lat.size - 1, 25600)
+    lat_hi = interpolate.interp1d(xd, lat)(x_hi)
+    yd = np.linspace(0, 12, 12)
+
+    def _interp(zon):
+        return interpolate.RectBivariateSpline(yd, xd, zon)(yd, x_hi)
+
+    def _track(fzon, hemi):
+        fi = _interp(fzon)
+        idx = np.argmax(fi, axis=1) if hemi == "NH" else np.argmin(fi, axis=1)
+        return idx, lat_hi[idx]
+
+    def _series(zon_int, idx12):
+        return np.array([np.mean(zon_int[m, idx12[m] - half_win: idx12[m] + half_win])
+                         for m in range(12)])
+
+    def _sdiff(x):
+        return np.mean(x[[11, 0, 1]]) - np.mean(x[[5, 6, 7]])
+
+    print(f"R5 diag: F_TE_final[0] == F_TE_final[5]: {same_track_field}")
+
+    bars = {}
+    for hemi in ("SH", "NH"):
+        idx_tot, lat_tot = _track(fte_total_zon, hemi)
+        for weak in (True, False):
+            idx_cat, lat_cat = (idx_tot, lat_tot) if weak else _track(fte_int_zon, hemi)
+            shf_i = _interp(shf_zon[weak])
+            foot_i = _interp(foot_zon[weak])
+
+            raw_b = _series(shf_i, idx_tot)          # panel-b series (total track)
+            raw_d = _series(shf_i, idx_cat)          # panels c-f series
+            f_m = _series(foot_i, idx_cat)           # monthly footprint
+            f_hat = float(np.mean(_series(foot_i, idx_tot)))  # as in notebook
+
+            # Panel-b bar rescaled by one constant (reviewer's expectation).
+            # Notebook plots D_I * 1e15 * PW_FACTOR = raw / (cos(lat) * f_hat).
+            bar_const = _sdiff(raw_b) / (np.cos(np.deg2rad(np.mean(lat_tot))) * f_hat)
+            # Exact panels c-f value: monthly normalization, then DJF-JJA.
+            d_series = raw_d / (np.cos(np.deg2rad(lat_cat)) * f_hat)
+            bar_exact = _sdiff(d_series)
+
+            # Eq 8 / S15 split of the same quantity: I_norm = f * T.
+            i_norm = raw_d / np.cos(np.deg2rad(lat_cat))
+            t_m = i_norm / f_m
+            bar_foot = float(np.mean(t_m)) * _sdiff(f_m) / f_hat
+            bar_eff = _sdiff(t_m)
+            bar_cov = bar_exact - bar_foot - bar_eff
+
+            key = (hemi, "weak" if weak else "intense")
+            bars[key] = (bar_const, bar_exact, bar_foot, bar_eff, bar_cov)
+            print(f"R5 diag {key}: const={bar_const:+.4f} exact={bar_exact:+.4f} "
+                  f"foot={bar_foot:+.4f} eff={bar_eff:+.4f} cov={bar_cov:+.4f} "
+                  f"lat_cat_ann={np.mean(lat_cat):+.1f}")
+
+    labels = ["Fig. 3a,b bar / constant\n(reviewer's expectation)",
+              "exact, as plotted\nin Fig. 3c-f (Eq. 7)",
+              "footprint term\n$\\hat{T}\\,\\Delta f/\\hat{f}$ (Eq. 8)",
+              "efficiency term\n$\\Delta T$ (Eq. 8)",
+              "covariance term\n(neglected in Eq. S15)"]
+    colors = ["#9ecae1", "#2171b5", "#fdae6b", "#74c476", "0.55"]
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6), sharey=True)
+    width = 0.16
+    for j, hemi in enumerate(("SH", "NH")):
+        ax = axes[j]
+        for g, cat in enumerate(("weak", "intense")):
+            vals = bars[(hemi, cat)]
+            for i, v in enumerate(vals):
+                ax.bar(g + (i - 2) * width, v, width * 0.92, color=colors[i],
+                       edgecolor="black", linewidth=0.5)
+        ax.axhline(0, color="black", lw=1)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["weak cyclones", "intense cyclones"], fontsize=11)
+        ax.set_title(f"({chr(97 + j)}) {hemi} $\\Delta I^L_{{c;\\mathrm{{SHF}}}}$"
+                     " (winter $-$ summer)", fontsize=12)
+        if j == 0:
+            ax.set_ylabel("PW (sign convention of Fig. 3c-f)")
+    handles = [matplotlib.patches.Patch(facecolor=c, edgecolor="black",
+                                        linewidth=0.5, label=l)
+               for c, l in zip(colors, labels)]
+    fig.legend(handles=handles, loc="lower center", bbox_to_anchor=(0.5, 0.01),
+               ncol=5, frameon=False, fontsize=8, columnspacing=1.2,
+               handletextpad=0.5)
+    fig.suptitle("SHF seasonality: constant vs monthly stormtrack-latitude "
+                 "normalization, and the Eq. 8 split", fontsize=13, y=0.99)
+    fig.subplots_adjust(bottom=0.24, top=0.86, wspace=0.08)
+
+    out = os.path.join(OUT_DIR, "R5_SHF_normalization.png")
+    fig.savefig(out, dpi=300, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    print("saved", out)
+
+
 if __name__ == "__main__":
     figure_r1_smoothing()
     figure_r2_za_composite_nh()
     figure_r3_shf_anomaly_sh()
     figure_r4_shf_remainder_nh()
+    figure_r5_shf_normalization()
     print("all reviewer figures done")
