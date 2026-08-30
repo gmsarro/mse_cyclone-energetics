@@ -294,22 +294,25 @@ def figure_r3_shf_anomaly_sh():
 
 
 def figure_r4_shf_remainder_nh():
-    """NH DJF-JJA change of the local surface heat flux (W m-2).
+    """NH DJF-JJA change of the surface heat flux, split by feature masks.
 
-    Maps of the total field, the part sampled inside cyclone+anticyclone
-    masks, and the remainder (outside all tracked features), plus their NH
-    zonal means. Same sampled fields (intensity cut 1 CVU) used for the
-    manuscript budgets, before poleward integration.
+    Maps of the local field (W m-2): total, part sampled inside the
+    cyclone+anticyclone masks, and the remainder (outside all tracked
+    features), plus their NH zonal means. A final panel shows the
+    poleward-integrated version (PW) of the same split, computed from the
+    sampled budget fields as SHF = tot_energy + dhdt - OLR - SWABS (the
+    exact quantity whose stormtrack value gives the Fig 3a,b SHF bars).
     """
     import cartopy.crs as ccrs
     import cartopy.feature as cfeature
+
+    djf = [11, 0, 1]
+    jja = [5, 6, 7]
 
     nc = f"{ROOT}/cyclone_centered/WATTS_Cyclones_Sampled_Poleward_Fluxes_0.225.nc"
     with xr.open_dataset(nc) as d:
         lat = d["lat"].values
         lon = d["lon"].values
-        djf = [11, 0, 1]
-        jja = [5, 6, 7]
 
         def seas(v):
             x = d[v][0].values
@@ -318,6 +321,22 @@ def figure_r4_shf_remainder_nh():
         tot = seas("F_Shf_final")
         feat = seas("F_Shf_final_cycl") + seas("F_Shf_final_ant")
     rem = tot - feat
+
+    nc_pw = f"{ROOT}/cyclone_centered/WITH_INT_Cyclones_Sampled_Poleward_Fluxes_0.225.nc"
+    with xr.open_dataset(nc_pw) as d:
+        lat_pw = d["lat"].values
+
+        def shf_zon(suffix):
+            combo = (d[f"tot_energy_final{suffix}"][0].values
+                     + d[f"F_Dhdt_final{suffix}"][0].values
+                     - d[f"F_Olr_final{suffix}"][0].values
+                     - d[f"F_Swabs_final{suffix}"][0].values)
+            zon = np.nanmean(combo, axis=2)
+            return np.mean(zon[djf], axis=0) - np.mean(zon[jja], axis=0)
+
+        tot_pw = shf_zon("")
+        feat_pw = shf_zon("_cycl") + shf_zon("_ant")
+    rem_pw = tot_pw - feat_pw
 
     lon_p = np.where(lon > 180, lon - 360, lon)
     order = np.argsort(lon_p)
@@ -347,21 +366,32 @@ def figure_r4_shf_remainder_nh():
     cax = fig.add_axes([0.905, 0.55, 0.015, 0.33])
     fig.colorbar(cf, cax=cax).set_label("W m$^{-2}$")
 
-    axz = fig.add_subplot(gs[1, 1])
-    nh = lat > 0
-    for field, label, color in [
-        (tot, "total", "black"),
-        (feat, "cyclones + anticyclones", "crimson"),
-        (rem, "remainder", "royalblue"),
+    st_lat = float(np.mean(_stormtrack_lat12("NH")))
+    sub = gs[1, 1].subgridspec(1, 2, wspace=0.10)
+    axz = fig.add_subplot(sub[0, 0])
+    axp = fig.add_subplot(sub[0, 1], sharey=axz)
+    nh = lat > 20
+    nh_pw = lat_pw > 20
+    for (field, field_pw), label, color in [
+        ((tot, tot_pw), "total", "black"),
+        ((feat, feat_pw), "cyclones + anticyclones", "crimson"),
+        ((rem, rem_pw), "remainder", "royalblue"),
     ]:
         axz.plot(np.nanmean(field, axis=1)[nh], lat[nh], color=color,
                  lw=1.8, label=label)
-    axz.axvline(0, color="0.6", lw=0.8)
-    axz.set_ylim(0, 90)
-    axz.set_xlabel("W m$^{-2}$")
+        axp.plot(field_pw[nh_pw], lat_pw[nh_pw], color=color, lw=1.8)
+    for ax in (axz, axp):
+        ax.axvline(0, color="0.6", lw=0.8)
+        ax.axhline(st_lat, color="0.4", lw=0.9, ls="--")
+        ax.set_ylim(20, 90)
+        ax.tick_params(labelsize=9)
+    axz.set_xlabel("W m$^{-2}$", fontsize=10)
     axz.set_ylabel("latitude")
-    axz.set_title("(d) NH zonal mean of (a)-(c)", fontsize=13)
-    axz.legend(frameon=False, fontsize=10, loc="lower left")
+    axz.set_title("(d) NH zonal mean\nof (a)-(c)", fontsize=11)
+    axz.legend(frameon=False, fontsize=8, loc="lower left")
+    axp.set_xlabel("PW", fontsize=10)
+    axp.set_title("(e) poleward-integrated\n$\\Delta I_{\\mathrm{SHF}}$ (as Fig. 3b)", fontsize=11)
+    plt.setp(axp.get_yticklabels(), visible=False)
 
     fig.suptitle(
         "NH DJF$-$JJA change of the surface heat flux, split by feature masks",
