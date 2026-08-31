@@ -403,6 +403,87 @@ def figure_r4_shf_remainder_nh():
     print("saved", out)
 
 
+def figure_r4b_withint_shf_maps():
+    """Check maps for R4 panel (e): the poleward-integrated SHF data.
+
+    Maps the NH DJF-JJA change of the poleward-integrated SHF budget combo
+    (tot_energy + dhdt - OLR - SWABS from the WITH_INT sampled file, i.e.
+    the exact data behind the Fig 3a,b bars) for the total field, the
+    cyclone+anticyclone part, and the remainder. The zonal means of these
+    maps are the curves of R4 panel (e). Each gridpoint holds the
+    integral accumulated from the south at that longitude, scaled so that
+    the zonal mean is in PW. Diagnostic only; not in the response letter.
+    """
+    import cartopy.crs as ccrs
+    import cartopy.feature as cfeature
+
+    djf = [11, 0, 1]
+    jja = [5, 6, 7]
+
+    nc_pw = f"{ROOT}/cyclone_centered/WITH_INT_Cyclones_Sampled_Poleward_Fluxes_0.225.nc"
+    with xr.open_dataset(nc_pw) as d:
+        lat = d["lat"].values
+        lon = d["lon"].values
+
+        def combo2d(suffix):
+            combo = (d[f"tot_energy_final{suffix}"][0].values
+                     + d[f"F_Dhdt_final{suffix}"][0].values
+                     - d[f"F_Olr_final{suffix}"][0].values
+                     - d[f"F_Swabs_final{suffix}"][0].values)
+            return (np.nanmean(combo[djf], axis=0)
+                    - np.nanmean(combo[jja], axis=0))
+
+        tot = combo2d("")
+        feat = combo2d("_cycl") + combo2d("_ant")
+    rem = tot - feat
+
+    st_lat = float(np.mean(_stormtrack_lat12("NH")))
+
+    lon_p = np.where(lon > 180, lon - 360, lon)
+    order = np.argsort(lon_p)
+    lon_p = lon_p[order]
+
+    band = (lat > 20) & (lat < 90)
+    vmax = np.nanpercentile(np.abs(tot[band]), 98)
+    vmax = np.ceil(vmax * 2) / 2
+    levels = np.linspace(-vmax, vmax, 21)
+
+    fig = plt.figure(figsize=(11, 11))
+    gs = fig.add_gridspec(3, 1, hspace=0.28, left=0.07, right=0.87,
+                          top=0.90, bottom=0.05)
+    specs = [
+        (tot, "(a) Total $\\Delta I_{\\mathrm{SHF}}$ (DJF$-$JJA)"),
+        (feat, "(b) Cyclone + anticyclone part"),
+        (rem, "(c) Remainder = (a) $-$ (b)"),
+    ]
+    for row, (field, title) in enumerate(specs):
+        ax = fig.add_subplot(gs[row, 0], projection=ccrs.PlateCarree())
+        ax.set_extent([-180, 180, 0, 90], crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.COASTLINE.with_scale("110m"), linewidth=0.6)
+        cf = ax.contourf(lon_p, lat, field[:, order], levels=levels,
+                         cmap=CMAP, extend="both",
+                         transform=ccrs.PlateCarree())
+        ax.plot([-180, 180], [st_lat, st_lat], ls="--", color="0.3",
+                lw=0.9, transform=ccrs.PlateCarree())
+        ax.set_title(title, fontsize=13)
+        ax.set_xticks(np.arange(-180, 181, 60), crs=ccrs.PlateCarree())
+        ax.set_yticks(np.arange(0, 81, 20), crs=ccrs.PlateCarree())
+        ax.tick_params(labelsize=8)
+    cax = fig.add_axes([0.89, 0.20, 0.017, 0.55])
+    fig.colorbar(cf, cax=cax).set_label(
+        "PW (per-longitude value; zonal mean = R4e curves)")
+
+    fig.suptitle(
+        "Poleward-integrated SHF data behind the Fig. 3 bars:\n"
+        "NH DJF$-$JJA change, split by feature masks (dashed: stormtrack latitude)",
+        y=0.975, fontweight="bold", fontsize=14,
+    )
+    out = os.path.join(OUT_DIR, "R4b_SHF_withint_maps_NH.png")
+    fig.savefig(out, dpi=300, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    print("saved", out)
+
+
 if __name__ == "__main__":
     figure_r1_smoothing()
     figure_r2_za_composite_nh()
