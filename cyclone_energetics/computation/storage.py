@@ -1,3 +1,16 @@
+"""MSE storage term: time tendency of the column enthalpy.
+
+    S(t) = d/dt [ g^-1 int_{p_top}^{p_sfc(t)} (cp T + Lv q) dp ]
+
+The column enthalpy E(t) is evaluated at every 6-hourly step with the
+instantaneous surface pressure as the lower limit (exact partial bottom layer,
+see gridded_data.integrate_column_to_surface) and then differenced in time
+(centred; forward/backward at the month ends). Differencing h on fixed pressure
+levels below a time-mean surface would omit the column-mass term
+h_sfc dp_sfc/dt / g, which is O(100 W m-2) in the pressure falls and rises of
+individual cyclones and would otherwise alias into the residual surface flux.
+"""
+
 from __future__ import annotations
 
 import gc
@@ -13,7 +26,7 @@ import cyclone_energetics.gridded_data as gridded_data
 
 _LOG = logging.getLogger(__name__)
 
-_DEFAULT_CHUNK_SIZE: int = 36
+_DEFAULT_TIME_BLOCK: int = 8
 
 
 def compute_storage_term(
@@ -42,6 +55,23 @@ def compute_storage_term(
             )
 
 
+def column_enthalpy(
+    *,
+    temperature: np.ndarray,
+    specific_humidity: np.ndarray,
+    surface_pressure: np.ndarray,
+    pressure_levels_pa: np.ndarray,
+) -> np.ndarray:
+    """E = g^-1 int_0^{p_sfc} (cp T + Lv q) dp  [J m-2] for a (time, level, lat, lon) block."""
+    enthalpy = constants.CPD * temperature
+    enthalpy += constants.LATENT_HEAT_VAPORIZATION * specific_humidity
+    return gridded_data.integrate_column_to_surface(
+        field=enthalpy,
+        surface_pressure=surface_pressure,
+        pressure_levels=pressure_levels_pa,
+    ) / constants.GRAVITY
+
+
 def _process_single_month_dhdt(
     *,
     year: int,
@@ -51,6 +81,7 @@ def _process_single_month_dhdt(
     filename_pattern: str,
     variable_names: typing.Dict[str, str],
     subdirectories: typing.Optional[typing.Dict[str, str]],
+    time_block: int = _DEFAULT_TIME_BLOCK,
 ) -> None:
     path_kw = dict(
         data_directory=data_directory, year=year, month=month,
@@ -63,95 +94,63 @@ def _process_single_month_dhdt(
     latitude, longitude = gridded_data.read_coordinates(temperature_path)
     n_timesteps = gridded_data.read_n_time(temperature_path)
     pressure_levels_pa = gridded_data.read_pressure_levels(humidity_path)
-    pressure_levels = xarray.DataArray(
-        pressure_levels_pa, dims=["level"], coords={"level": pressure_levels_pa},
-    )
 
     time_coord = gridded_data.open_field(
         temperature_path, variable=variable_names["temperature"],
         latitude_slice=slice(0, 1),
     ).coords["time"]
     dt_step = gridded_data.infer_time_step_seconds(time_coord)
-    dt_centered = 2.0 * dt_step
-    dt_forward = dt_step
 
-    n_latitude = len(latitude)
-    n_longitude = len(longitude)
-    chunk = min(_DEFAULT_CHUNK_SIZE, n_latitude)
-    n_blocks = (n_latitude + chunk - 1) // chunk
-
-    surface_pressure_all = gridded_data.open_field(
+    surface_pressure_all = gridded_data.read_field(
         surface_pressure_path, variable=variable_names["surface_pressure"],
     )
-    surface_pressure_mean = surface_pressure_all.mean(dim="time")
-    del surface_pressure_all
-
-    storage_term = np.zeros((n_timesteps, n_latitude, n_longitude), dtype=np.float64)
-
-    for lat_block in range(n_blocks):
-        lat_start = lat_block * chunk
-        lat_end = min((lat_block + 1) * chunk, n_latitude)
-        _LOG.info("  Latitude block: %s to %s", lat_start, lat_end)
-
-        lat_sl = slice(lat_start, lat_end)
-        surface_pressure_chunk = surface_pressure_mean.isel(latitude=lat_sl)
-
-        beta = gridded_data.compute_beta_mask(
-            pressure_levels=pressure_levels,
-            surface_pressure=surface_pressure_chunk,
+    if surface_pressure_all.shape[0] != n_timesteps:
+        raise ValueError(
+            "surface pressure has %d time steps, temperature %d"
+            % (surface_pressure_all.shape[0], n_timesteps)
         )
 
-        temperature = gridded_data.open_field(
-            temperature_path, variable=variable_names["temperature"], latitude_slice=lat_sl,
-        ).assign_coords(level=pressure_levels_pa)
-        specific_humidity = gridded_data.open_field(
-            humidity_path, variable=variable_names["specific_humidity"], latitude_slice=lat_sl,
-        ).assign_coords(level=pressure_levels_pa)
-
-        moist_static_energy = (
-            constants.CPD * temperature + constants.LATENT_HEAT_VAPORIZATION * specific_humidity
-        ) * beta
-        del temperature, specific_humidity, beta
-
-        dmse_dt = xarray.zeros_like(moist_static_energy)
-        dmse_dt[dict(time=slice(1, -1))] = (
-            (moist_static_energy.isel(time=slice(2, None)).values
-             - moist_static_energy.isel(time=slice(None, -2)).values)
-            / dt_centered
+    # Files are typically [time, level, lat, lon]; reading contiguous time blocks
+    # is much faster than latitude slabs.
+    energy = np.zeros((n_timesteps, len(latitude), len(longitude)), dtype=np.float64)
+    for block_start in range(0, n_timesteps, time_block):
+        block = slice(block_start, min(block_start + time_block, n_timesteps))
+        temperature = gridded_data.read_field(
+            temperature_path, variable=variable_names["temperature"], time_slice=block,
         )
-        dmse_dt[dict(time=0)] = (
-            (moist_static_energy.isel(time=1).values
-             - moist_static_energy.isel(time=0).values) / dt_forward
+        specific_humidity = gridded_data.read_field(
+            humidity_path, variable=variable_names["specific_humidity"], time_slice=block,
         )
-        dmse_dt[dict(time=-1)] = (
-            (moist_static_energy.isel(time=-1).values
-             - moist_static_energy.isel(time=-2).values) / dt_forward
+        energy[block] = column_enthalpy(
+            temperature=temperature,
+            specific_humidity=specific_humidity,
+            surface_pressure=surface_pressure_all[block],
+            pressure_levels_pa=pressure_levels_pa,
         )
-        del moist_static_energy
-
-        dmse_dt = dmse_dt.fillna(0.0)
-
-        sign = 1.0 if float(pressure_levels_pa[1] - pressure_levels_pa[0]) > 0 else -1.0
-        integrated = sign * dmse_dt.integrate("level") / constants.GRAVITY
-        del dmse_dt
-
-        storage_term[:, lat_start:lat_end, :] = integrated.values
-        del integrated
+        del temperature, specific_humidity
         gc.collect()
-        _LOG.info("  Block %s complete", lat_block)
+    _LOG.info("Column enthalpy complete for year=%s month=%s", year, month)
 
-    _LOG.info("Vertical integration complete for year=%s month=%s", year, month)
+    storage_term = np.empty_like(energy)
+    storage_term[1:-1] = (energy[2:] - energy[:-2]) / (2.0 * dt_step)
+    storage_term[0] = (energy[1] - energy[0]) / dt_step
+    storage_term[-1] = (energy[-1] - energy[-2]) / dt_step
+    del energy
 
     out_path = output_directory / ("tend_%d_%s_2.nc" % (year, month))
     result = xarray.DataArray(
         storage_term.astype(np.float32),
         dims=("time", "latitude", "longitude"),
-        coords={"latitude": latitude, "longitude": longitude},
+        coords={"time": time_coord.values, "latitude": latitude, "longitude": longitude},
     )
     dataset_out = result.to_dataset(name="tend")
     dataset_out["tend"].attrs = {
         "units": "W/m^2",
-        "long_name": "time tendency of vertically integrated moist static energy",
+        "long_name": "time tendency of the column moist static energy (cp T + Lv q) "
+                     "integrated to the instantaneous surface pressure",
+        "method": "E(t) = g^-1 int_0^{p_sfc(t)} h dp with an exact partial bottom layer; "
+                  "centred time difference; includes the column-mass term h_sfc dp_sfc/dt / g",
     }
     dataset_out.to_netcdf(str(out_path))
     _LOG.info("Saved dh/dt file: %s", out_path)
+

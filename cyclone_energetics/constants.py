@@ -55,6 +55,6 @@ NOLEAP_MONTH_CUMULATIVE: np.ndarray = np.concatenate(
     [[0], np.cumsum(NOLEAP_MONTH_LENGTHS)]
 )
 
-HOSKINS_N0: int = 60
+HOSKINS_N0: int = 27
 HOSKINS_R: int = 1
 HOSKINS_NTRUNC: int = 100
