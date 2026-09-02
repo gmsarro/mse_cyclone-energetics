@@ -2,7 +2,7 @@
 
 R1: raw vs Hoskins-filtered 6-hourly total energy flux divergence.
 R2: NH cyclone-centered annual-mean zonal MSE advection composite.
-R3: SH cyclone-centered annual-mean SHF composite and its zonal anomaly.
+R3: SH cyclone-centered annual-mean SHF composite and its meridional anomaly.
 R4: NH DJF-JJA SHF change split by feature masks.
 
 All inputs are pre-computed netCDF files; this script only plots.
@@ -236,14 +236,28 @@ def figure_r2_za_composite_nh():
 
 
 def figure_r3_shf_anomaly_sh():
-    """SH annual-mean SHF composite (W/m2) and its zonal anomaly.
+    """SH annual-mean cyclone-centered SHF (W/m2) and its meridional anomaly.
+
+    Top row: the budget-residual surface heat flux F_SHF composited around
+    intense / weak SH cyclones (composite_Shf_wm), with the 2-m temperature
+    anomaly marking the warm and cold sectors.
+    Bottom row: the meridional SHF anomaly F_SHF - mbar (mbar = instantaneous
+    per-longitude meridional mean), i.e. the integrand of the poleward
+    integral I_SHF whose composite is contoured in manuscript Figs 5d/6d.
+    It is obtained exactly as the meridional derivative of the composite of
+    the poleward integral (composite_Shf, PW), since compositing and
+    differentiation commute:  S' = dF/dphi * 1e15 / (2 pi a^2 cos phi).
+    The Fig. 5d/6d contours (-I_SHF / cos phi, annual mean) are overlaid.
 
     Display follows manuscript Figs 5-6: meridional axis reversed so the
     poleward side of the cyclone is on the positive y-axis.
     """
+    import re
+
     fig, axes = plt.subplots(2, 2, figsize=(11, 8.6), sharex=True, sharey=True)
     lev_full = np.arange(-200, 201, 10)
-    lev_anom = np.arange(-60, 61, 5)
+    lev_anom = np.arange(-200, 201, 10)
+    lev_pw = np.arange(-20, 21, 4)
 
     handles = {}
     for k, (tag, title) in enumerate([("Intense", "intense cyclones"),
@@ -253,14 +267,26 @@ def figure_r3_shf_anomaly_sh():
         ) as d:
             y = d["y"].values
             x = d["x"].values
-            shf = d["composite_Shf_wm"].values.mean(axis=0)
+            st = np.array([float(v) for v in
+                           re.findall(r"-?\d+\.\d+", d.attrs["storm_track_latitudes"])])
+            shf_wm = d["composite_Shf_wm"].values            # (12, y, x) W m-2
+            i_shf = d["composite_Shf"].values                # (12, y, x) PW
             vo = d["composite_VO"].values.mean(axis=0)
+            t2m = d["composite_T"].values.mean(axis=0)
 
-        shf_anom = shf - shf.mean(axis=1, keepdims=True)
+        cosphi = np.cos(np.deg2rad(st[:, None, None] + y[None, :, None]))
+        dphi = np.deg2rad(y[1] - y[0])
+        # integrand of I_SHF (W m-2), per month then annual mean
+        sprime = (np.gradient(i_shf * 1e15, axis=1) / dphi
+                  / (2.0 * np.pi * EARTH_RADIUS ** 2 * cosphi)).mean(axis=0)
+        # manuscript Fig 5d/6d field: -I_SHF / cos phi, annual mean
+        p_shf = (-i_shf / cosphi).mean(axis=0)
+        shf_ann = shf_wm.mean(axis=0)
+        t2m_anom = t2m - t2m.mean(axis=1, keepdims=True)
 
         for row, (field, levels, label) in enumerate([
-            (shf, lev_full, "$\\widehat{\\mathrm{SHF}}$"),
-            (shf_anom, lev_anom, "$\\widehat{\\mathrm{SHF}}^{*}$ (zonal anomaly)"),
+            (shf_ann, lev_full, "$F_{\\mathrm{SHF}}$ composite"),
+            (sprime, lev_anom, "meridional anomaly $F_{\\mathrm{SHF}}-\\bar{m}$"),
         ]):
             ax = axes[row, k]
             cf = ax.contourf(x, y, field[::-1, :], levels=levels,
@@ -268,12 +294,21 @@ def figure_r3_shf_anomaly_sh():
             cc = ax.contour(x, y, vo[::-1, :], levels=[-1],
                             colors="purple", linewidths=1)
             ax.clabel(cc, fmt={-1: "1 CVU"})
-            ax.set_title(f"{label}, SH {title}", fontsize=11)
+            if row == 0:
+                ct = ax.contour(x, y, t2m_anom[::-1, :],
+                                levels=[-1.5, -1, -0.5, 0.5, 1, 1.5], colors="k",
+                                linewidths=0.8, linestyles=["--"] * 3 + ["-"] * 3)
+                ax.clabel(ct, fmt="%.1f K", fontsize=7)
+            else:
+                cp = ax.contour(x, y, p_shf[::-1, :], levels=lev_pw, colors="k",
+                                linewidths=0.7)
+                ax.clabel(cp, fmt="%d", fontsize=7)
+            ax.set_title(f"{label}, SH {title}", fontsize=10.5)
             if row == 1:
                 ax.set_xlabel("rlon")
             if k == 0:
                 ax.set_ylabel("rlat (poleward positive)")
-            ax.text(-0.03, 1.03, f"({chr(97 + 2 * row + k)})",
+            ax.text(-0.12, 1.03, f"({chr(97 + 2 * row + k)})",
                     transform=ax.transAxes, fontsize=12,
                     fontweight="bold", va="bottom", clip_on=False)
             handles[row] = cf
