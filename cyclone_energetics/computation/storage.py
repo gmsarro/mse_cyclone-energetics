@@ -55,7 +55,7 @@ def compute_storage_term(
             )
 
 
-def column_enthalpy(
+def compute_column_enthalpy(
     *,
     temperature: np.ndarray,
     specific_humidity: np.ndarray,
@@ -83,13 +83,18 @@ def _process_single_month_dhdt(
     subdirectories: typing.Optional[typing.Dict[str, str]],
     time_block: int = _DEFAULT_TIME_BLOCK,
 ) -> None:
-    path_kw = dict(
-        data_directory=data_directory, year=year, month=month,
+    temperature_path = gridded_data.resolve_path(
+        field="temperature", data_directory=data_directory, year=year, month=month,
         filename_pattern=filename_pattern, subdirectories=subdirectories,
     )
-    temperature_path = gridded_data.resolve_path(field="temperature", **path_kw)
-    humidity_path = gridded_data.resolve_path(field="specific_humidity", **path_kw)
-    surface_pressure_path = gridded_data.resolve_path(field="surface_pressure", **path_kw)
+    humidity_path = gridded_data.resolve_path(
+        field="specific_humidity", data_directory=data_directory, year=year, month=month,
+        filename_pattern=filename_pattern, subdirectories=subdirectories,
+    )
+    surface_pressure_path = gridded_data.resolve_path(
+        field="surface_pressure", data_directory=data_directory, year=year, month=month,
+        filename_pattern=filename_pattern, subdirectories=subdirectories,
+    )
 
     latitude, longitude = gridded_data.read_coordinates(temperature_path)
     n_timesteps = gridded_data.read_n_time(temperature_path)
@@ -110,8 +115,6 @@ def _process_single_month_dhdt(
             % (surface_pressure_all.shape[0], n_timesteps)
         )
 
-    # Files are typically [time, level, lat, lon]; reading contiguous time blocks
-    # is much faster than latitude slabs.
     energy = np.zeros((n_timesteps, len(latitude), len(longitude)), dtype=np.float64)
     for block_start in range(0, n_timesteps, time_block):
         block = slice(block_start, min(block_start + time_block, n_timesteps))
@@ -121,7 +124,7 @@ def _process_single_month_dhdt(
         specific_humidity = gridded_data.read_field(
             humidity_path, variable=variable_names["specific_humidity"], time_slice=block,
         )
-        energy[block] = column_enthalpy(
+        energy[block] = compute_column_enthalpy(
             temperature=temperature,
             specific_humidity=specific_humidity,
             surface_pressure=surface_pressure_all[block],

@@ -14,7 +14,7 @@
 ;   SMOOTH_SUFFIXED     — comma-separated output variable names (with _filtered suffix)
 ;   SMOOTH_TLOW         — low truncation wavenumber  (default 0)
 ;   SMOOTH_THIGH        — high truncation wavenumber (default 100)
-;   SMOOTH_N0           — Hoskins filter damping wavenumber (default 60)
+;   SMOOTH_N0           — Hoskins filter damping wavenumber (default 27)
 ;   SMOOTH_R            — Hoskins filter exponent          (default 1)
 ;
 ; Developer: Chanil Park (Seoul National University), adapted by G. M. Sarro
@@ -47,7 +47,7 @@ else
     Thigh = toint(Thigh_str)
 end if
 if (ismissing(n0_str)) then
-    n0 = 60
+    n0 = 27
 else
     n0 = toint(n0_str)
 end if

@@ -119,6 +119,19 @@ ordering to the canonical `(time, level, latitude, longitude)` form
 and provides `resolve_dimension_name()` for flexible coordinate lookup
 across datasets with different naming conventions.
 
+## Method notes
+
+- **Storage term (`compute-dhdt`).** The column enthalpy
+  `g^-1 int_0^{p_sfc(t)} (cp T + Lv q) dp` is evaluated at every 6-hourly step
+  with the instantaneous surface pressure as the lower limit
+  (`gridded_data.integrate_column_to_surface`, exact partial bottom layer) and
+  then differenced in time. This keeps the column-mass term
+  `h_sfc dp_sfc/dt / g`, which is of order 100 W m^-2 in the pressure falls and
+  rises of individual cyclones and would otherwise alias into the surface heat
+  flux obtained as the budget residual.
+- **Hoskins filter (`smooth-hoskins`).** All budget terms are smoothed with the
+  same parameters, `T100`, `n0 = 27`, `r = 1` (`constants.HOSKINS_*`).
+
 ## License
 
 MIT
