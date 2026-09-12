@@ -244,7 +244,8 @@ def _load_yearly_fluxes(
                                 "F_TE_z_final", "F_UM_z_final"):
                     variable_name = "%s%s" % (variable_name_base, suffix)
                     if variable_name in dataset.variables:
-                        key = "2d_%s%s_%d" % (variable_name_base.replace("_final", ""), suffix, icut)
+                        base = variable_name_base.replace("_final", "")
+                        key = "2d_%s%s_%d" % (base, suffix, icut)
                         result[key] = np.asarray(dataset[variable_name][icut, :, yr_in_file, :, :])
 
     return result
@@ -424,49 +425,27 @@ def _compute_3term_decomp_yearly(
     area_sh: npt.NDArray,
     stormtrack_index_nh: npt.NDArray,
     stormtrack_index_sh: npt.NDArray,
-    latitude_fine: npt.NDArray,
     n_fine: int,
     half_win: int,
 ) -> typing.Dict[str, npt.NDArray]:
     n_months = F_TE_cycl_zon.shape[0]
     F_TE_cycl_int = _interp_lat_2d(F_TE_cycl_zon, n_fine=n_fine)
 
-    first_term_NH = np.zeros(n_months)
-    first_term_SH = np.zeros(n_months)
+    flux_nh = np.zeros(n_months)
+    flux_sh = np.zeros(n_months)
+    area_sh_real = np.zeros(n_months)
 
     for n in range(n_months):
-        flux_nh = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_nh[n], half_win=half_win)
-        flux_sh = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
-        sh_idx = (n - 6) % n_months
-        first_term_NH[n] = flux_nh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_nh[n]])) * area_nh[n])
-        first_term_SH[n] = flux_sh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_sh[n]])) * area_sh[sh_idx])
+        flux_nh[n] = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_nh[n], half_win=half_win)
+        flux_sh[n] = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
+        area_sh_real[n] = area_sh[(n - 6) % n_months]
 
-    plot_2_nh = np.zeros(n_months)
-    plot_2_sh = np.zeros(n_months)
-    plot_4_nh = np.zeros(n_months)
-    plot_4_sh = np.zeros(n_months)
-    plot_5_nh = np.zeros(n_months)
-    plot_5_sh = np.zeros(n_months)
-
-    for n in range(n_months):
-        flux_nh = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_nh[n], half_win=half_win)
-        flux_sh = _slice_mean(F_TE_cycl_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
-        sh_idx = (n - 6) % n_months
-
-        plot_2_nh[n] = flux_nh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_nh[n]])) * np.mean(area_nh))
-        plot_2_sh[n] = flux_sh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_sh[n]])) * np.mean(area_sh))
-        plot_4_nh[n] = flux_nh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_nh[n]])) * area_nh[n])
-        plot_4_sh[n] = flux_sh / (np.cos(np.deg2rad(latitude_fine[stormtrack_index_sh[n]])) * area_sh[sh_idx])
-        plot_5_nh[n] = (
-            np.mean(first_term_NH)
-            * (np.cos(np.deg2rad(latitude_fine[stormtrack_index_nh[n]])) * area_nh[n])
-            / np.mean(area_nh)
-        )
-        plot_5_sh[n] = (
-            np.mean(first_term_SH)
-            * (np.cos(np.deg2rad(latitude_fine[stormtrack_index_sh[n]])) * area_sh[sh_idx])
-            / np.mean(area_sh)
-        )
+    plot_2_nh = flux_nh / np.mean(area_nh)
+    plot_2_sh = flux_sh / np.mean(area_sh_real)
+    plot_4_nh = flux_nh / area_nh
+    plot_4_sh = flux_sh / area_sh_real
+    plot_5_nh = np.mean(plot_4_nh) * area_nh / np.mean(area_nh)
+    plot_5_sh = np.mean(plot_4_sh) * area_sh_real / np.mean(area_sh_real)
 
     return {
         "plot_2_nh": plot_2_nh - np.mean(plot_2_nh),
@@ -485,8 +464,6 @@ def _compute_DI_yearly(
     area_sh_scalar: float,
     stormtrack_index_nh: npt.NDArray,
     stormtrack_index_sh: npt.NDArray,
-    stormtrack_latitude_nh: npt.NDArray,
-    stormtrack_latitude_sh: npt.NDArray,
     n_fine: int,
     half_win: int,
     intensity_idx: int,
@@ -525,20 +502,13 @@ def _compute_DI_yearly(
 
         fld_int = _interp_lat_2d(field_zon, n_fine=n_fine)
 
-        def norm_factor(lat_deg: npt.NDArray, *, area_mean: float) -> npt.NDArray:
-            return (
-                constants.EARTH_RADIUS
-                * np.cos(np.deg2rad(lat_deg))
-                * 2 * np.pi * area_mean
-            )
-
         nh_raw = (
             _mean_around_track(fld_int, idx=stormtrack_index_nh, half_win=half_win)
-            / norm_factor(stormtrack_latitude_nh, area_mean=area_nh_scalar)
+            / (2 * np.pi * constants.EARTH_RADIUS * area_nh_scalar)
         )
         sh_raw = (
             _mean_around_track(fld_int, idx=stormtrack_index_sh, half_win=half_win)
-            / norm_factor(stormtrack_latitude_sh, area_mean=area_sh_scalar)
+            / (2 * np.pi * constants.EARTH_RADIUS * area_sh_scalar)
         )
 
         out["D_I_NH_%s%d" % (out_key, intensity_idx)] = nh_raw - np.mean(nh_raw)
@@ -551,6 +521,34 @@ def _compute_DI_yearly(
         out["D_I_%s_F_Shf%d" % (hemi, intensity_idx)] = tot - olr - sw
 
     return out
+
+
+def _fraction_at_track(
+    mask: npt.NDArray,
+    *,
+    stormtrack_index: npt.NDArray,
+    n_fine: int,
+) -> npt.NDArray:
+    n_months = stormtrack_index.shape[0]
+    mask_zon = np.repeat(np.mean(mask, axis=1)[np.newaxis, :], n_months, axis=0)
+    mask_int = _interp_lat_2d(mask_zon, n_fine=n_fine)
+    return np.array([mask_int[n, stormtrack_index[n]] for n in range(n_months)])
+
+
+def _seasonal_diff_masked_te(
+    field_2d: npt.NDArray,
+    *,
+    mask: npt.NDArray,
+    area: npt.NDArray,
+    stormtrack_index: npt.NDArray,
+    n_fine: int,
+    half_win: int,
+) -> float:
+    field_zon = np.mean(field_2d * mask[np.newaxis, :, :], axis=2)
+    field_int = _interp_lat_2d(field_zon, n_fine=n_fine)
+    series = _mean_around_track(field_int, idx=stormtrack_index, half_win=half_win)
+    series = series / (2 * np.pi * constants.EARTH_RADIUS * float(np.mean(area)))
+    return _seasonal_diff(series - np.mean(series)) * 1e15 * _PW_FACTOR
 
 
 def _compute_area_at_track_yearly(
@@ -572,12 +570,16 @@ def _compute_area_at_track_yearly(
         nh_cyc = _mean_around_track(cyc_int, idx=stormtrack_index_nh, half_win=half_win)
         sh_cyc = np.zeros(n_months)
         for n in range(n_months):
-            sh_cyc[(n - 6) % n_months] = _slice_mean(cyc_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
+            sh_cyc[(n - 6) % n_months] = _slice_mean(
+                cyc_int[n], centre=stormtrack_index_sh[n], half_win=half_win,
+            )
 
         nh_ant = _mean_around_track(ant_int, idx=stormtrack_index_nh, half_win=half_win)
         sh_ant = np.zeros(n_months)
         for n in range(n_months):
-            sh_ant[(n - 6) % n_months] = _slice_mean(ant_int[n], centre=stormtrack_index_sh[n], half_win=half_win)
+            sh_ant[(n - 6) % n_months] = _slice_mean(
+                ant_int[n], centre=stormtrack_index_sh[n], half_win=half_win,
+            )
 
         cut_label = 1 if cut_idx == 0 else 6
         out["cycl_NH_%d" % cut_label] = nh_cyc
@@ -671,7 +673,7 @@ def compute_interannual_variability(
 
         F_TE_total_zon = fluxes["F_TE_0"]
         F_TE_total_int = _interp_lat_2d(F_TE_total_zon, n_fine=n_fine)
-        stormtrack_index_nh, stormtrack_index_sh, stormtrack_latitude_nh, stormtrack_latitude_sh = _stormtrack_from_total_fte(
+        stormtrack_index_nh, stormtrack_index_sh, _, _ = _stormtrack_from_total_fte(
             F_TE_total_int, latitude_fine=latitude_fine,
         )
 
@@ -699,7 +701,6 @@ def compute_interannual_variability(
             F_TE_cycl_weak_zon,
             area_nh=area_weak_nh, area_sh=area_weak_sh,
             stormtrack_index_nh=stormtrack_index_nh, stormtrack_index_sh=stormtrack_index_sh,
-            latitude_fine=latitude_fine,
             n_fine=n_fine, half_win=half_win,
         )
 
@@ -708,7 +709,6 @@ def compute_interannual_variability(
             F_TE_cycl_strong_zon,
             area_nh=area_strong_nh, area_sh=area_strong_sh,
             stormtrack_index_nh=stormtrack_index_nh, stormtrack_index_sh=stormtrack_index_sh,
-            latitude_fine=latitude_fine,
             n_fine=n_fine, half_win=half_win,
         )
 
@@ -730,7 +730,6 @@ def compute_interannual_variability(
             area_nh_scalar=area_weak_nh_mean,
             area_sh_scalar=area_weak_sh_mean,
             stormtrack_index_nh=stormtrack_index_nh, stormtrack_index_sh=stormtrack_index_sh,
-            stormtrack_latitude_nh=stormtrack_latitude_nh, stormtrack_latitude_sh=stormtrack_latitude_sh,
             n_fine=n_fine, half_win=half_win,
             intensity_idx=0,
         )
@@ -740,7 +739,6 @@ def compute_interannual_variability(
             area_nh_scalar=area_strong_nh_mean,
             area_sh_scalar=area_strong_sh_mean,
             stormtrack_index_nh=stormtrack_index_nh, stormtrack_index_sh=stormtrack_index_sh,
-            stormtrack_latitude_nh=stormtrack_latitude_nh, stormtrack_latitude_sh=stormtrack_latitude_sh,
             n_fine=n_fine, half_win=half_win,
             intensity_idx=5,
         )
@@ -755,7 +753,32 @@ def compute_interannual_variability(
         fig4_te_sd[yr_idx, 2] = _seasonal_diff(te_strong_sh)
         fig4_te_sd[yr_idx, 3] = _seasonal_diff(te_strong_nh)
 
-        fig5_te_sd[yr_idx, :] = 0.0
+        te_ca_2d = fluxes["2d_F_TE_cycl_0"] + fluxes["2d_F_TE_ant_0"]
+        area_ca_nh = area_at_track["cycl_NH_1"] + area_at_track["ant_NH_1"]
+        land_frac = _fraction_at_track(
+            land_mask, stormtrack_index=stormtrack_index_nh, n_fine=n_fine,
+        )
+        ocean_frac = _fraction_at_track(
+            ocean_mask, stormtrack_index=stormtrack_index_nh, n_fine=n_fine,
+        )
+        area_strong_land = _mean_around_track(
+            _interp_lat_2d(cycl_land_zon[5], n_fine=n_fine),
+            idx=stormtrack_index_nh, half_win=half_win,
+        )
+        area_strong_oce = _mean_around_track(
+            _interp_lat_2d(cycl_oce_zon[5], n_fine=n_fine),
+            idx=stormtrack_index_nh, half_win=half_win,
+        )
+        for panel, (field_2d, mask, area) in enumerate([
+            (te_ca_2d, land_mask, area_ca_nh * land_frac),
+            (te_ca_2d, ocean_mask, area_ca_nh * ocean_frac),
+            (fluxes["2d_F_TE_cycl_5"], land_mask, area_strong_land),
+            (fluxes["2d_F_TE_cycl_5"], ocean_mask, area_strong_oce),
+        ]):
+            fig5_te_sd[yr_idx, panel] = _seasonal_diff_masked_te(
+                field_2d, mask=mask, area=area,
+                stormtrack_index=stormtrack_index_nh, n_fine=n_fine, half_win=half_win,
+            )
 
     _LOG.info("Computing std across years")
 
@@ -787,7 +810,7 @@ def compute_interannual_variability(
             ("fig1_band_a", fig1_band_a,
              "interannual max std band for Figure 1 panel a (TE/area_mean)"),
             ("fig1_band_b", fig1_band_b,
-             "interannual max std band for Figure 1 panel b (mean_IL * cos*area)"),
+             "interannual max std band for Figure 1 panel b (mean_TL * area/area_mean)"),
             ("fig1_band_c", fig1_band_c,
              "interannual max std band for Figure 1 panel c (TE/area)"),
         ]:
