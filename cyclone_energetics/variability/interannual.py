@@ -22,23 +22,28 @@ _PW_FACTOR: float = 2 * np.pi * constants.EARTH_RADIUS / 1e15
 
 _SMOOTH_WINDOW: int = 3
 
+# NH land/ocean domains of the land-ocean budget figure. Boxes are half-open in latitude and
+# longitude, (lat_south <= lat < lat_north) and (lon_west <= lon < lon_east), with lon in [0, 360).
+# Land boxes are applied first, ocean overrides second; both masks are then restricted to
+# _MASK_LAT_SOUTH <= lat < _MASK_LAT_NORTH.
 _LAND_REGIONS: typing.List[typing.Tuple[float, float, float, float]] = [
-    (32.5, 90.0, 0.0, 112.5),
+    (-90.0, 90.0, 0.0, 112.5),
+    (32.5, 90.0, 237.5, 285.0),
+    (42.5, 90.0, 225.0, 237.5),
+    (42.5, 90.0, 285.0, 300.0),
+    (35.0, 90.0, 112.5, 137.5),
+    (22.5, 90.0, 112.5, 122.5),
     (57.5, 90.0, 112.5, 337.5),
-    (32.5, 57.5, 112.5, 137.5),
-    (42.5, 57.5, 112.5, 122.5),
-    (32.5, 47.5, 122.5, 137.5),
-    (37.5, 62.5, 237.5, 285.0),
-    (47.5, 87.5, 237.5, 300.0),
+    (2.5, 45.0, 347.5, 360.0),
 ]
 _OCEAN_OVERRIDES: typing.List[typing.Tuple[float, float, float, float]] = [
     (80.0, 90.0, 0.0, 360.0),
-    (70.0, 90.0, 55.0, 95.0),
-    (50.0, 67.5, 122.5, 137.5),
-    (45.0, 52.5, 0.0, 22.5),
+    (67.5, 90.0, 0.0, 15.0),
+    (22.5, 40.0, 122.5, 137.5),
+    (37.5, 45.0, 0.0, 22.5),
 ]
-_MASK_LAT_SOUTH: float = 0.0
-_MASK_LAT_NORTH: float = 57.5
+_MASK_LAT_SOUTH: float = 32.5
+_MASK_LAT_NORTH: float = 90.0
 
 
 def _interp_lat_2d(
@@ -145,62 +150,29 @@ def _band_from_lines(
     return float(np.max(mean_std)), mean_std, std_per_month
 
 
-def _nearest_idx(
-    values: npt.NDArray,
-    *,
-    val: float,
-) -> int:
-    return int(np.argmin(np.abs(values - val)))
-
-
 def _build_land_ocean_masks(
     *,
     latitude: npt.NDArray,
     longitude: npt.NDArray,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
-    n_lat = latitude.shape[0]
-    n_lon = longitude.shape[0]
-    lon360 = longitude % 360
+    lat2d = np.asarray(latitude, dtype=float)[:, np.newaxis]
+    lon2d = (np.asarray(longitude, dtype=float) % 360.0)[np.newaxis, :]
 
-    lat_s_idx = _nearest_idx(latitude, val=_MASK_LAT_SOUTH)
-    lat_n_idx = _nearest_idx(latitude, val=_MASK_LAT_NORTH)
-    lat_lo = min(lat_s_idx, lat_n_idx)
-    lat_hi = max(lat_s_idx, lat_n_idx) + 1
+    def _box(lat_south: float, lat_north: float, lon_west: float, lon_east: float) -> npt.NDArray:
+        return (
+            (lat2d >= lat_south) & (lat2d < lat_north)
+            & (lon2d >= lon_west) & (lon2d < lon_east)
+        )
 
-    land_mask = np.zeros((n_lat, n_lon))
+    is_land = np.zeros((lat2d.shape[0], lon2d.shape[1]), dtype=bool)
+    for region in _LAND_REGIONS:
+        is_land |= _box(*region)
+    for region in _OCEAN_OVERRIDES:
+        is_land &= ~_box(*region)
 
-    for (lat_south, lat_north, lon_west, lon_east) in _LAND_REGIONS:
-        i_s = _nearest_idx(latitude, val=lat_south)
-        i_n = _nearest_idx(latitude, val=lat_north)
-        j_w = _nearest_idx(lon360, val=lon_west)
-        j_e = _nearest_idx(lon360, val=lon_east)
-        r_lo, r_hi = min(i_s, i_n), max(i_s, i_n) + 1
-        c_lo, c_hi = min(j_w, j_e), max(j_w, j_e) + 1
-        land_mask[r_lo:r_hi, c_lo:c_hi] = 1.0
-
-    for (lat_south, lat_north, lon_west, lon_east) in _OCEAN_OVERRIDES:
-        i_s = _nearest_idx(latitude, val=lat_south)
-        i_n = _nearest_idx(latitude, val=lat_north)
-        j_w = _nearest_idx(lon360, val=lon_west)
-        j_e = _nearest_idx(lon360, val=lon_east)
-        r_lo, r_hi = min(i_s, i_n), max(i_s, i_n) + 1
-        c_lo, c_hi = min(j_w, j_e), max(j_w, j_e) + 1
-        land_mask[r_lo:r_hi, c_lo:c_hi] = 0.0
-
-    if latitude[0] > latitude[-1]:
-        land_mask[:lat_lo, :] = 0.0
-        land_mask[lat_hi:, :] = 0.0
-    else:
-        land_mask[:lat_lo, :] = 0.0
-        land_mask[lat_hi:, :] = 0.0
-
-    ocean_mask = 1.0 - land_mask
-    if latitude[0] > latitude[-1]:
-        ocean_mask[:lat_lo, :] = 0.0
-        ocean_mask[lat_hi:, :] = 0.0
-    else:
-        ocean_mask[:lat_lo, :] = 0.0
-        ocean_mask[lat_hi:, :] = 0.0
+    in_domain = _box(_MASK_LAT_SOUTH, _MASK_LAT_NORTH, 0.0, 360.0)
+    land_mask = (is_land & in_domain).astype(float)
+    ocean_mask = (~is_land & in_domain).astype(float)
 
     return ocean_mask, land_mask
 
